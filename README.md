@@ -133,18 +133,52 @@ Copy the JSON, paste it into **Foods → Import from the recipe analyzer**. It b
 a food you can log by the serving. The importer converts per-serving macros into a
 per-100 g block so recipes and packaged products are handled identically.
 
-## Files
+## Project layout
 
-| File | Purpose |
-|---|---|
-| `lib.js` | Pure logic: OFF normalization, net carbs, GI watchlist, totals. No DOM, no network. |
-| `store.js` | IndexedDB persistence + JSON export/import. |
-| `app.js` | UI wiring, barcode scanning, rendering. |
-| `sw.js` | Service worker: offline shell, network-first product cache. |
-| `test_lib.js` | Node unit tests for parsing/macros (`node test_lib.js`). |
-| `test_offline.js` | Node unit tests for every lookup failure mode (`node test_offline.js`). |
-| `serve.py` | Local dev server on `localhost` (secure context). |
-| `fetch-vendor.sh` / `.ps1` | Vendor the scanner library to drop the CDN dependency. |
+```
+foodlog-pwa/
+├── index.html              App shell: markup for all four tabs, loads the scripts.
+├── styles.css              All styling. Dark theme, no framework, no build step.
+├── manifest.webmanifest    PWA metadata: name, icons, standalone display mode.
+├── sw.js                   Service worker. Precaches the shell for offline use;
+│                             Open Food Facts requests are network-first with a
+│                             cache fallback.
+├── icon-192.png            Home-screen icons referenced by the manifest.
+├── icon-512.png
+│
+├── lib.js                  Pure logic. No DOM, no network, no side effects:
+│                             - normalizeProduct()  Open Food Facts JSON -> internal shape
+│                             - scanIngredients()   the high-GI / refined-carb watchlist
+│                             - netCarbs(), macrosForGrams(), dailyTotals()
+│                             - lookupProduct()     offline-tolerant lookup state machine
+│                             - recipeFromAnalyzerJson()  import from the recipe analyzer
+├── store.js                IndexedDB persistence: log entries, custom foods,
+│                             settings, and the cached-product mirror. Plus
+│                             JSON export/import.
+├── app.js                  UI wiring: tabs, camera scanning, rendering, the
+│                             8-second lookup timeout, offline banner, and the
+│                             manual-entry fallback path.
+│
+├── test_lib.js             Node tests: parsing, macros, GI watchlist, recipe import.
+├── test_offline.js         Node tests: every lookup failure mode (timeout, offline,
+│                             cache fallback, unknown barcode).
+│
+├── serve.py                Local dev server on localhost (a secure context, so the
+│                             camera and service worker both work).
+├── fetch-vendor.sh         Download the scanner library into vendor/ so the app has
+├── fetch-vendor.ps1          no CDN dependency. Run once, then commit the result.
+├── vendor/                 Holds html5-qrcode.min.js once vendored. Empty by default;
+│                             index.html falls back to the CDN when it is.
+│
+├── .gitignore
+└── README.md               You are here.
+```
+
+The split that matters is **`lib.js` has no dependencies on the browser**. Every
+decision the app makes — what counts as a net carb, whether an ingredient is a
+refined starch, what to do when a lookup times out — lives there and is covered by
+tests that run under plain Node. `app.js` only moves data between `lib.js`,
+`store.js`, and the DOM.
 
 Run the tests with:
 
@@ -158,6 +192,28 @@ node test_offline.js   # 29 assertions: timeout, offline, cache fallback, not-fo
 Edit `GI_WATCHLIST` in `lib.js`. Each entry is a regex, a display label, a severity
 (`high` = behaves like glucose or worse; `moderate` = a real sugar around GI 50–70),
 and a one-line note shown in the warning box.
+
+## Standing on Open Food Facts
+
+This app is a thin layer over [Open Food Facts](https://world.openfoodfacts.org/).
+Every barcode you scan, every ingredient list it reads, every NOVA processing score
+it shows, and the additive data behind the flags — all of it comes from their
+database. Without it there would be nothing here to build on. It is a free, open,
+non-profit project, and the product data is contributed by volunteers, photographed
+and typed in one label at a time.
+
+That is also why this app has no subscription and never will: the data isn't ours to
+charge for.
+
+**If you get any use out of this, please consider supporting their work** — by
+[contributing](https://world.openfoodfacts.org/contribute), which can be as small as
+scanning a product they're missing or fixing an ingredient list, or by
+[donating](https://donate.openfoodfacts.org/). The database only stays good if people
+keep feeding it. When a barcode you scan comes back unknown, that's an invitation:
+add it there, and the next person finds it.
+
+Product data is made available under the
+[Open Database License](https://opendatacommons.org/licenses/odbl/1-0/).
 
 ## Caveats
 
