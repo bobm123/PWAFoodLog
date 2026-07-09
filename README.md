@@ -170,6 +170,9 @@ foodlog-pwa/
 ├── vendor/                 Holds html5-qrcode.min.js once vendored. Empty by default;
 │                             index.html falls back to the CDN when it is.
 │
+├── LICENSE                 Apache License 2.0 (this project's code).
+├── NOTICE                  Attribution notices required by Apache-2.0 s4(d).
+├── THIRD-PARTY-NOTICES.md  Every dependency, its licence, and the ODbL analysis.
 ├── .gitignore
 └── README.md               You are here.
 ```
@@ -238,6 +241,45 @@ for servers, the small permanent team, and staying independent of the food indus
 
 Product data is made available under the
 [Open Database License](https://opendatacommons.org/licenses/odbl/1-0/).
+
+## Licensing
+
+**This project's code is Apache License 2.0** (see `LICENSE`), the same licence as
+its only dependency, so a single licence text covers the whole tree.
+
+| What | Licence | Shipped in this repo? |
+|---|---|---|
+| This app's code | Apache-2.0 | Yes |
+| [html5-qrcode](https://github.com/mebjas/html5-qrcode) 2.3.8 (+ bundled ZXing-js) | Apache-2.0 | Only after `fetch-vendor.sh` |
+| [Open Food Facts](https://world.openfoodfacts.org/) product data | [ODbL v1.0](https://opendatacommons.org/licenses/odbl/1-0/) | No — fetched at runtime |
+
+### Why Apache-2.0 and ODbL don't conflict
+
+The Open Database License governs **databases**, not code that reads them. Its
+share-alike provision attaches to a *Derivative Database* you publicly use or
+distribute. This app ships no Open Food Facts data: it queries their API on demand
+and caches results in the user's own browser. That is neither a derivative database
+nor a public distribution, so ODbL puts no condition on the source licence.
+
+ODbL does require **attribution** for a "Produced Work" — anything generated from
+the database, like the product card this app renders. That notice appears in the app
+under *Settings → About the flags*, and in `NOTICE` here.
+
+One forward-looking caveat: if you ever bundle an Open Food Facts data dump for fully
+offline lookup, you would then be distributing a derivative database, and ODbL
+share-alike would apply **to that data**. It still wouldn't relicense your code, but
+the bundled subset would have to stay ODbL and carry its attribution.
+
+### If you vendor the scanner
+
+Apache-2.0 §4(a) says anyone you redistribute the library to must receive a copy of
+its licence. `fetch-vendor.sh` downloads `vendor/html5-qrcode-LICENSE.txt` next to
+the library for exactly this reason — commit both. Using the CDN fallback instead
+means you aren't redistributing it, and the obligation doesn't arise.
+
+Full detail, including the ZXing-js sub-dependency, is in
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md). None of this is legal advice; if
+the stakes are commercial, have a lawyer read the licences rather than this README.
 
 ## Caveats
 

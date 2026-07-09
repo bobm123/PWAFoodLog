@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: Apache-2.0
+ * Copyright 2026 Robert Marchese
+ */
 /* app.js - UI wiring. Pure logic lives in lib.js, persistence in store.js. */
 (function () {
   "use strict";

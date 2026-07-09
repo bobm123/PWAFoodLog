@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: Apache-2.0
+ * Copyright 2026 Robert Marchese
+ */
 /* sw.js - offline app shell.
  * Shell files are precached. Open Food Facts lookups are network-first with a
  * cache fallback, so a product you scanned before still resolves offline.

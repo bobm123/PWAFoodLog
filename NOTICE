@@ -1,0 +1,41 @@
+Food Log
+Copyright 2026 Robert Marchese
+
+This product includes software developed by Robert Marchese, licensed under the
+Apache License, Version 2.0. See LICENSE.
+
+-------------------------------------------------------------------------------
+Third-party software
+-------------------------------------------------------------------------------
+
+This product optionally bundles html5-qrcode (vendor/html5-qrcode.min.js):
+
+    html5-qrcode
+    Copyright 2020 Minhaz <minhazav@gmail.com>
+    Licensed under the Apache License, Version 2.0
+    https://github.com/mebjas/html5-qrcode
+
+    html5-qrcode's distributed bundle incorporates the ZXing-js library,
+    a TypeScript port of ZXing, also licensed under the Apache License,
+    Version 2.0.
+    https://github.com/zxing-js/library
+
+If vendor/html5-qrcode.min.js is present in a distribution, a copy of its
+license must accompany it (Apache-2.0 section 4(a)); see
+vendor/html5-qrcode-LICENSE.txt, which fetch-vendor.sh downloads alongside it.
+
+-------------------------------------------------------------------------------
+Third-party data
+-------------------------------------------------------------------------------
+
+This product retrieves food product data at runtime from Open Food Facts.
+
+    Open Food Facts product data
+    (c) Open Food Facts contributors
+    Made available under the Open Database License (ODbL) v1.0
+    https://opendatacommons.org/licenses/odbl/1-0/
+    https://world.openfoodfacts.org/
+
+No Open Food Facts data is distributed with this source code. Data is fetched
+from the Open Food Facts API on demand and cached only in the browser of the
+person using the application.
