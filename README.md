@@ -43,6 +43,51 @@ each hit `high` or `moderate` severity with a short explanation.
 - **Your data stays on your device** (IndexedDB). Export/import JSON to back up
   or move between devices. There is no server and no account.
 
+## Behaviour with a weak or absent connection
+
+The app is offline-first. Everything except *new* barcode lookups works with no
+network at all:
+
+| Action | Offline? |
+|---|---|
+| Open the app (installed to home screen) | Yes — shell is precached |
+| Log foods, edit portions, delete entries | Yes |
+| Daily totals, calorie split, net-carb budget | Yes |
+| Custom foods and imported recipes | Yes |
+| Export / import JSON | Yes |
+| Scan a barcode you've scanned before | Yes — served from the on-device product cache |
+| Scan a **new** barcode | Needs a connection |
+
+Lookups are bounded by an **8-second timeout** (`LOOKUP_TIMEOUT_MS` in `app.js`)
+via `AbortController`, because `fetch()` has no timeout of its own and will
+otherwise hang for minutes on a weak signal. Every failure resolves to a specific,
+actionable message rather than a spinner:
+
+- **Offline, product cached** → serves the saved copy, marked "Saved copy — not refreshed".
+- **Offline, nothing cached** → "You're offline and this barcode isn't saved on this
+  device. Enter it by hand below."
+- **Timed out / unreachable** → falls back to the cached copy if there is one,
+  otherwise offers **Retry** and **Enter it by hand**.
+- **Barcode genuinely unknown to Open Food Facts** → offers manual entry (no Retry,
+  since retrying won't help).
+
+A banner appears whenever the browser reports it is offline. When you enter a food
+by hand you can attach the barcode that failed; it is then cached locally, so
+scanning that item again resolves instantly, even with no signal.
+
+## Removing the CDN dependency
+
+`index.html` loads the scanner from `vendor/html5-qrcode.min.js` and only falls back
+to unpkg if that file is missing. To make the folder fully self-contained:
+
+```bash
+./fetch-vendor.sh          # or: powershell -File fetch-vendor.ps1
+git add vendor/html5-qrcode.min.js && git commit -m "vendor scanner"
+```
+
+Commit the vendored file — a deployed copy without it silently falls back to the CDN.
+After vendoring, the only external call left is the Open Food Facts lookup itself.
+
 ## Deploying (required for camera scanning)
 
 iOS Safari only grants camera access over **HTTPS** (or `localhost`). Any free
@@ -63,12 +108,15 @@ IndexedDB gets much better persistence guarantees.
 
 Netlify or Cloudflare Pages work identically — drag the folder in.
 
-### Local testing (no camera)
+### Local testing
 
 ```bash
-python3 -m http.server 8000
-# then browse to http://localhost:8000
+python3 serve.py          # http://localhost:8000, no-store headers
 ```
+
+`localhost` is a secure context, so the camera scanner and service worker both work
+there. Opening `index.html` as a `file://` URL does **not** work: service workers
+don't register and the camera is blocked.
 
 Camera scanning works on `localhost` in Chrome; on a phone you need real HTTPS.
 Use the manual barcode box to test lookups without a camera. Try `3017620422003`
@@ -93,12 +141,16 @@ per-100 g block so recipes and packaged products are handled identically.
 | `store.js` | IndexedDB persistence + JSON export/import. |
 | `app.js` | UI wiring, barcode scanning, rendering. |
 | `sw.js` | Service worker: offline shell, network-first product cache. |
-| `test_lib.js` | Node unit tests for `lib.js` (`node test_lib.js`). |
+| `test_lib.js` | Node unit tests for parsing/macros (`node test_lib.js`). |
+| `test_offline.js` | Node unit tests for every lookup failure mode (`node test_offline.js`). |
+| `serve.py` | Local dev server on `localhost` (secure context). |
+| `fetch-vendor.sh` / `.ps1` | Vendor the scanner library to drop the CDN dependency. |
 
 Run the tests with:
 
 ```bash
-node test_lib.js    # 38 assertions
+node test_lib.js       # 38 assertions: parsing, macros, GI watchlist, recipe import
+node test_offline.js   # 29 assertions: timeout, offline, cache fallback, not-found
 ```
 
 ## Adding to the watchlist

@@ -9,7 +9,7 @@
   "use strict";
 
   var DB_NAME = "foodlog";
-  var DB_VERSION = 1;
+  var DB_VERSION = 2;
   var _db = null;
 
   function open() {
@@ -27,6 +27,11 @@
         }
         if (!db.objectStoreNames.contains("settings")) {
           db.createObjectStore("settings", { keyPath: "key" });
+        }
+        // v2: cache of normalized Open Food Facts products, keyed by the
+        // barcode that was queried, so scans resolve with no connection.
+        if (!db.objectStoreNames.contains("products")) {
+          db.createObjectStore("products", { keyPath: "code" });
         }
       };
       req.onsuccess = function () { _db = req.result; resolve(_db); };
@@ -87,6 +92,19 @@
     return put("settings", { key: key, value: value });
   }
 
+  /** Look up a cached product by the barcode that was queried. */
+  function getCachedProduct(code) {
+    return tx("products", "readonly", function (s) { return s.get(String(code)); })
+      .then(function (row) { return row ? row.product : null; }, function () { return null; });
+  }
+
+  /** Cache a normalized product under the queried barcode. */
+  function putCachedProduct(code, product) {
+    return put("products", {
+      code: String(code), product: product, cachedAt: new Date().toISOString()
+    });
+  }
+
   /** Ask the browser not to evict us. Best-effort. */
   function requestPersistence() {
     if (navigator.storage && navigator.storage.persist) {
@@ -96,6 +114,8 @@
   }
 
   function exportAll() {
+    // The product cache is deliberately NOT exported: it is a disposable
+    // mirror of Open Food Facts, not user data, and would bloat the backup.
     return Promise.all([getAll("entries"), getAll("foods"), getAll("settings")])
       .then(function (r) {
         return {
@@ -141,6 +161,7 @@
   root.Store = {
     open: open, getAll: getAll, put: put, del: del, clear: clear,
     entriesForDate: entriesForDate,
+    getCachedProduct: getCachedProduct, putCachedProduct: putCachedProduct,
     getSetting: getSetting, setSetting: setSetting,
     requestPersistence: requestPersistence,
     exportAll: exportAll, importAll: importAll

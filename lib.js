@@ -238,7 +238,110 @@
     return out;
   }
 
+  // ---------------------------------------------------------------------
+  // Offline-tolerant product lookup.
+  //
+  // Written against injected dependencies so every failure path (timeout,
+  // dropped connection, airplane mode, unknown barcode) is unit-testable
+  // without a network or a browser.
+  //
+  // Resolution order when online:
+  //   network(variant 1) -> network(variant 2) -> not-found
+  // On a network/timeout failure at any point we fall back to the local
+  // product cache, so a barcode you have scanned before still resolves.
+  // When offline we skip the network entirely and go straight to cache.
+  //
+  // This never rejects. It always resolves to a result object so the UI can
+  // render a specific, honest message instead of a spinner that never stops.
+  // ---------------------------------------------------------------------
+  var ERR = {
+    OFFLINE: "offline",     // no connection and nothing cached
+    TIMEOUT: "timeout",     // request took too long
+    NETWORK: "network",     // request failed
+    NOT_FOUND: "not-found"  // reached the server; barcode genuinely unknown
+  };
+
+  var ERR_MESSAGE = {
+    offline: "You're offline and this barcode isn't saved on this device. Enter it by hand below.",
+    timeout: "Open Food Facts didn't respond. Check your signal, or enter it by hand.",
+    network: "Couldn't reach Open Food Facts. Check your signal, or enter it by hand.",
+    "not-found": "This barcode isn't in Open Food Facts. Enter it by hand below."
+  };
+
+  function isTimeoutError(err) {
+    return !!err && (err.name === "AbortError" || err.timeout === true);
+  }
+
+  /**
+   * deps = {
+   *   fetchJson(url) -> Promise<json>   (rejects on timeout/network)
+   *   getCached(code) -> Promise<product|null>
+   *   putCached(code, product) -> Promise<any>
+   *   isOnline() -> boolean
+   * }
+   * Resolves to { product, source, stale, offline, error, message }.
+   */
+  function lookupProduct(deps, code) {
+    var variants = barcodeVariants(code);
+
+    function fromCache(reason) {
+      var i = 0;
+      function next() {
+        if (i >= variants.length) {
+          return Promise.resolve({
+            product: null, source: null, stale: false,
+            offline: reason === ERR.OFFLINE,
+            error: reason, message: ERR_MESSAGE[reason]
+          });
+        }
+        return deps.getCached(variants[i++]).then(function (p) {
+          if (p) {
+            return {
+              product: p, source: "cache", stale: true,
+              offline: reason === ERR.OFFLINE, error: null,
+              message: reason === ERR.OFFLINE
+                ? "Offline - showing the copy saved on this device."
+                : "Couldn't reach Open Food Facts - showing the saved copy."
+            };
+          }
+          return next();
+        }, next);
+      }
+      return next();
+    }
+
+    if (!deps.isOnline()) return fromCache(ERR.OFFLINE);
+
+    var i = 0;
+    function attempt() {
+      if (i >= variants.length) {
+        return Promise.resolve({
+          product: null, source: null, stale: false, offline: false,
+          error: ERR.NOT_FOUND, message: ERR_MESSAGE[ERR.NOT_FOUND]
+        });
+      }
+      var v = variants[i++];
+      return deps.fetchJson(API.OFF_URL(v)).then(function (json) {
+        var p = normalizeProduct(json);
+        if (!p) return attempt();               // status 0 -> try next variant
+        function done() {
+          return { product: p, source: "network", stale: false, offline: false,
+                   error: null, message: null };
+        }
+        // A cache write failure must never sink a successful lookup.
+        return deps.putCached(v, p).then(done, done);
+      }, function (err) {
+        return fromCache(isTimeoutError(err) ? ERR.TIMEOUT : ERR.NETWORK);
+      });
+    }
+    return attempt();
+  }
+
   var API = {
+    ERR: ERR,
+    ERR_MESSAGE: ERR_MESSAGE,
+    isTimeoutError: isTimeoutError,
+    lookupProduct: lookupProduct,
     GI_WATCHLIST: GI_WATCHLIST,
     NOVA_LABELS: NOVA_LABELS,
     scanIngredients: scanIngredients,

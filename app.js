@@ -6,6 +6,33 @@
   var scanner = null;
   var currentProduct = null;
   var carbTarget = null;
+  var lastCode = null;                 // for the Retry button
+  var LOOKUP_TIMEOUT_MS = 8000;        // bad wireless shouldn't hang forever
+
+  /**
+   * fetch() has no timeout of its own: on a weak signal it can hang until the
+   * OS gives up, which can be minutes. AbortController bounds it.
+   */
+  function fetchJson(url) {
+    var ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, LOOKUP_TIMEOUT_MS);
+    return fetch(url, ctrl ? { signal: ctrl.signal } : undefined)
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then(
+        function (j) { clearTimeout(timer); return j; },
+        function (e) { clearTimeout(timer); throw e; }
+      );
+  }
+
+  var lookupDeps = {
+    fetchJson: fetchJson,
+    getCached: function (code) { return S.getCachedProduct(code); },
+    putCached: function (code, p) { return S.putCachedProduct(code, p); },
+    isOnline: function () { return navigator.onLine !== false; }
+  };
 
   function today() {
     var d = new Date();
@@ -23,6 +50,13 @@
   function status(el, msg, kind) {
     el.textContent = msg;
     el.className = "status" + (kind ? " " + kind : "");
+  }
+
+  /** Persistent banner so the user is never surprised by a failed lookup. */
+  function refreshOnlineBanner() {
+    var off = navigator.onLine === false;
+    $("offlineBanner").classList.toggle("hidden", !off);
+    $("btnScan").disabled = false; // scanning still works; only lookup needs net
   }
 
   // ---------------------------------------------------------------- badges
@@ -96,11 +130,13 @@
   }
 
   // ------------------------------------------------------------ product UI
-  function renderProduct(p) {
+  function renderProduct(p, stale) {
     currentProduct = p;
     var serving = p.servingGrams || 100;
     $("productCard").innerHTML =
-      '<div class="card"><div class="prod">' +
+      '<div class="card">' +
+      (stale ? '<p class="stale">Saved copy - not refreshed from Open Food Facts.</p>' : "") +
+      '<div class="prod">' +
         (p.image ? '<img src="' + esc(p.image) + '" alt="">' : "") +
         '<div><div class="nm"><b>' + esc(p.name) + "</b></div>" +
         (p.brand ? '<div class="sub">' + esc(p.brand) + "</div>" : "") +
@@ -152,33 +188,56 @@
       status($("scanStatus"), "That doesn't look like a barcode.", "err");
       return;
     }
-    status($("scanStatus"), "Looking up " + code + "…");
+    lastCode = code;
+    $("productCard").innerHTML = "";
+    $("btnLookup").disabled = true;
+    status($("scanStatus"), navigator.onLine === false
+      ? "Offline - checking saved products…"
+      : "Looking up " + code + "…");
 
-    // Try the printed barcode, then its UPC-A/EAN-13 leading-zero variant.
-    var variants = L.barcodeVariants(code);
-    (function attempt(i) {
-      if (i >= variants.length) {
-        status($("scanStatus"), "Not in Open Food Facts. Add it by hand under Foods.", "err");
-        $("productCard").innerHTML = "";
+    L.lookupProduct(lookupDeps, code).then(function (r) {
+      $("btnLookup").disabled = false;
+
+      if (r.product) {
+        // Usable result, possibly from the on-device cache.
+        status($("scanStatus"), r.stale ? r.message : "", r.stale ? "warn" : "");
+        renderProduct(r.product, r.stale);
         return;
       }
-      fetch(L.OFF_URL(variants[i]))
-        .then(function (r) { return r.json(); })
-        .then(function (j) {
-          var p = L.normalizeProduct(j);
-          if (!p) return attempt(i + 1);
-          status($("scanStatus"), "", "");
-          renderProduct(p);
-        })
-        .catch(function () {
-          status($("scanStatus"), "Lookup failed. Check your connection.", "err");
-        });
-    })(0);
+      // No product: explain precisely why, and offer the manual path.
+      status($("scanStatus"), r.message, "err");
+      renderFallback(code, r.error);
+    });
+  }
+
+  /** When a lookup can't produce a product, keep the user moving. */
+  function renderFallback(code, err) {
+    var retryable = err !== L.ERR.NOT_FOUND;
+    $("productCard").innerHTML =
+      '<div class="card">' +
+        "<h2>Couldn't load " + esc(code) + "</h2>" +
+        '<p class="hint">' + esc(L.ERR_MESSAGE[err] || "Lookup failed.") + "</p>" +
+        '<div class="row">' +
+          (retryable ? '<button id="btnRetry" class="ghost">Retry</button>' : "") +
+          '<button id="btnManual" class="primary">Enter it by hand</button>' +
+        "</div>" +
+        '<p class="hint">Logging, custom foods and totals all keep working offline.</p>' +
+      "</div>";
+
+    if (retryable) $("btnRetry").addEventListener("click", function () { lookup(code); });
+    $("btnManual").addEventListener("click", function () {
+      showTab("foods");
+      $("cfName").value = "";
+      $("cfBarcode").value = code;      // carry the barcode across
+      $("cfName").focus();
+    });
   }
 
   function startScan() {
     if (typeof Html5Qrcode === "undefined") {
-      status($("scanStatus"), "Scanner library didn't load. Use manual entry.", "err");
+      status($("scanStatus"),
+        "Camera scanner didn't load (offline on first run?). Type the barcode below - everything else still works.",
+        "err");
       return;
     }
     var reader = $("reader");
@@ -235,6 +294,7 @@
   function saveManualFood() {
     var name = $("cfName").value.trim();
     var g = parseFloat($("cfGrams").value);
+    var barcode = $("cfBarcode").value.trim();
     if (!name || !(g > 0)) { alert("Give the food a name and a serving weight in grams."); return; }
     var fat = parseFloat($("cfFat").value) || 0,
         carb = parseFloat($("cfCarb").value) || 0,
@@ -243,14 +303,28 @@
     var k = 100 / g;
     var food = {
       id: "food:" + name.toLowerCase().replace(/[^a-z0-9]+/g, "-") + ":" + Date.now(),
-      type: "food", name: name, brand: "Custom",
+      type: "food", name: name, brand: "Custom", code: barcode || "",
       servingGrams: g, servingLabel: "1 serving (" + fmt(g, 0) + " g)",
       per100: { fat: fat * k, carb: carb * k, fiber: fiber * k, protein: prot * k, sugars: 0,
                 kcal: (fat * 9 + Math.max(0, carb - fiber) * 4 + prot * 4) * k },
-      nova: 1, additives: [], ingredientsText: "", flags: []
+      nova: null, additives: [], ingredientsText: "", flags: []
     };
-    S.put("foods", food).then(function () {
-      ["cfName", "cfGrams", "cfFat", "cfCarb", "cfFiber", "cfProtein"].forEach(function (i) { $(i).value = ""; });
+    var jobs = [S.put("foods", food)];
+    // If it came from a barcode we couldn't resolve, cache it under that code
+    // so a future scan of the same item resolves instantly, even offline.
+    if (barcode) {
+      jobs.push(S.putCachedProduct(barcode, {
+        code: barcode, name: name, brand: "Custom (entered by hand)", image: "",
+        per100: food.per100, servingSize: "", servingGrams: g,
+        nova: null, additives: [], ingredientsText: "", flags: []
+      }));
+    }
+    Promise.all(jobs).then(function () {
+      ["cfName", "cfGrams", "cfFat", "cfCarb", "cfFiber", "cfProtein", "cfBarcode"]
+        .forEach(function (i) { $(i).value = ""; });
+      status($("foodStatus"), barcode
+        ? "Saved. Scanning " + barcode + " will now find it, even offline."
+        : "Saved.", "ok");
       renderFoods();
     });
   }
@@ -362,6 +436,10 @@
       else if (b.dataset.delfood) S.del("foods", b.dataset.delfood).then(renderFoods);
       else if (b.dataset.log) logFood(b.dataset.log);
     });
+
+    window.addEventListener("online", refreshOnlineBanner);
+    window.addEventListener("offline", refreshOnlineBanner);
+    refreshOnlineBanner();
 
     S.requestPersistence();
     loadSettings().then(renderToday).then(renderFoods);

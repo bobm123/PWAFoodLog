@@ -14,6 +14,10 @@
 </head>
 <body>
 
+<div id="offlineBanner" class="offlinebanner hidden" role="status">
+  Offline &mdash; logging and custom foods still work. New barcodes need a connection.
+</div>
+
 <header class="topbar">
   <h1>Food Log</h1>
   <input type="date" id="dayPicker" aria-label="Log date">
@@ -77,6 +81,8 @@
       <div class="grid2">
         <label>Name<input id="cfName" placeholder="Keto sardine cakes"></label>
         <label>Serving (g)<input id="cfGrams" type="number" step="any" placeholder="192"></label>
+        <label>Barcode (optional)<input id="cfBarcode" inputmode="numeric" placeholder="from a failed scan"></label>
+        <label>&nbsp;<span class="hint" style="margin:0">Saving with a barcode makes future scans resolve offline.</span></label>
         <label>Fat (g)<input id="cfFat" type="number" step="any"></label>
         <label>Carbs (g)<input id="cfCarb" type="number" step="any"></label>
         <label>Fiber (g)<input id="cfFiber" type="number" step="any"></label>
@@ -84,6 +90,7 @@
       </div>
       <p class="hint">Enter the amounts for <em>one serving</em>. Net carbs = carbs &minus; fiber.</p>
       <button id="btnAddFood" class="primary">Save food</button>
+      <p class="status" id="foodStatus"></p>
     </div>
 
     <div class="card">
@@ -143,7 +150,13 @@
   </section>
 </main>
 
-<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<!--
+  Scanner library: prefer the vendored local copy so the app has no CDN
+  dependency. If vendor/html5-qrcode.min.js is absent we fall back to the CDN.
+  Run ./fetch-vendor.sh (or fetch-vendor.ps1) once to vendor it.
+-->
+<script src="vendor/html5-qrcode.min.js"
+        onerror="var s=document.createElement('script');s.src='https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';s.async=false;document.head.appendChild(s);"></script>
 <script src="lib.js"></script>
 <script src="store.js"></script>
 <script src="app.js"></script>
