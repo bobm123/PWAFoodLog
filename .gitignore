@@ -1,0 +1,14 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# Node (only used for running test_lib.js; no deps are required)
+node_modules/
+npm-debug.log*
+package-lock.json
+
+# Local exports from the app
+foodlog-*.json

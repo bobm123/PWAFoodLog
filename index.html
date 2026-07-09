@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14532d">
+<title>Food Log</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Food Log">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <h1>Food Log</h1>
+  <input type="date" id="dayPicker" aria-label="Log date">
+</header>
+
+<!-- Daily totals summary, always visible -->
+<section class="totals" id="totals" aria-live="polite">
+  <div class="tot"><span class="tval" id="tNetCarb">0</span><span class="tlab">net carbs</span></div>
+  <div class="tot"><span class="tval" id="tFat">0</span><span class="tlab">fat</span></div>
+  <div class="tot"><span class="tval" id="tProtein">0</span><span class="tlab">protein</span></div>
+  <div class="tot"><span class="tval" id="tKcal">0</span><span class="tlab">kcal</span></div>
+</section>
+<div class="splitbar" id="splitBar" title="Calorie split">
+  <span class="sfat"></span><span class="scarb"></span><span class="sprot"></span>
+</div>
+<p class="splitlabel" id="splitLabel"></p>
+
+<nav class="tabs" role="tablist">
+  <button class="tab active" data-tab="today" role="tab">Today</button>
+  <button class="tab" data-tab="scan" role="tab">Scan</button>
+  <button class="tab" data-tab="foods" role="tab">Foods</button>
+  <button class="tab" data-tab="settings" role="tab">Settings</button>
+</nav>
+
+<main>
+  <!-- ------------------------------ TODAY ------------------------------ -->
+  <section id="panel-today" class="panel active">
+    <div id="entryList" class="list"></div>
+    <p class="empty" id="todayEmpty">Nothing logged yet. Scan a barcode or add a food.</p>
+  </section>
+
+  <!-- ------------------------------ SCAN ------------------------------- -->
+  <section id="panel-scan" class="panel">
+    <div class="card">
+      <div id="reader" class="reader hidden"></div>
+      <div class="row">
+        <button id="btnScan" class="primary">Start camera scan</button>
+        <button id="btnStopScan" class="ghost hidden">Stop</button>
+      </div>
+      <p class="hint" id="scanHint">Camera scanning needs HTTPS. If it won't start, type the barcode below.</p>
+      <div class="row">
+        <input id="manualCode" inputmode="numeric" placeholder="Barcode, e.g. 3017620422003">
+        <button id="btnLookup" class="primary">Look up</button>
+      </div>
+      <p class="status" id="scanStatus"></p>
+    </div>
+    <div id="productCard"></div>
+  </section>
+
+  <!-- ------------------------------ FOODS ------------------------------ -->
+  <section id="panel-foods" class="panel">
+    <div class="card">
+      <h2>Custom foods &amp; recipes</h2>
+      <p class="hint">Saved foods can be logged by the serving. Recipes never expire and work offline.</p>
+      <div id="foodList" class="list"></div>
+      <p class="empty" id="foodsEmpty">No custom foods yet.</p>
+    </div>
+
+    <div class="card">
+      <h2>Add a food by hand</h2>
+      <div class="grid2">
+        <label>Name<input id="cfName" placeholder="Keto sardine cakes"></label>
+        <label>Serving (g)<input id="cfGrams" type="number" step="any" placeholder="192"></label>
+        <label>Fat (g)<input id="cfFat" type="number" step="any"></label>
+        <label>Carbs (g)<input id="cfCarb" type="number" step="any"></label>
+        <label>Fiber (g)<input id="cfFiber" type="number" step="any"></label>
+        <label>Protein (g)<input id="cfProtein" type="number" step="any"></label>
+      </div>
+      <p class="hint">Enter the amounts for <em>one serving</em>. Net carbs = carbs &minus; fiber.</p>
+      <button id="btnAddFood" class="primary">Save food</button>
+    </div>
+
+    <div class="card">
+      <h2>Import from the recipe analyzer</h2>
+      <p class="hint">
+        Paste the output of
+        <code>analyze_recipe.py &lt;recipe.txt&gt; --json</code>.
+      </p>
+      <textarea id="recipeJson" rows="5" placeholder='{"title":"Keto Savory Sardine Cakes", ...}'></textarea>
+      <button id="btnImportRecipe" class="primary">Import recipe</button>
+      <p class="status" id="importStatus"></p>
+    </div>
+  </section>
+
+  <!-- ---------------------------- SETTINGS ----------------------------- -->
+  <section id="panel-settings" class="panel">
+    <div class="card">
+      <h2>Net-carb budget</h2>
+      <label class="inline">
+        Daily net-carb target (g)
+        <input id="setCarbTarget" type="number" step="any" placeholder="20">
+      </label>
+      <p class="hint">Leave blank to just track totals with no target. Set it to see a progress bar and an over-budget warning.</p>
+      <button id="btnSaveSettings" class="primary">Save</button>
+      <p class="status" id="settingsStatus"></p>
+    </div>
+
+    <div class="card">
+      <h2>Your data</h2>
+      <p class="hint">Everything is stored on this device only. Nothing is uploaded. Export regularly to back up or move devices.</p>
+      <div class="row">
+        <button id="btnExport" class="ghost">Export JSON</button>
+        <label class="filebtn ghost">Import JSON<input id="fileImport" type="file" accept="application/json,.json" hidden></label>
+      </div>
+      <p class="status" id="dataStatus"></p>
+    </div>
+
+    <div class="card">
+      <h2>About the flags</h2>
+      <p class="hint">
+        Product data comes from <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a>,
+        a free open database. The <strong>NOVA</strong> score rates processing from 1 (whole food)
+        to 4 (ultra-processed).
+      </p>
+      <p class="hint">
+        Ingredients are also scanned for refined, high-glycemic carbs. This matters because
+        <strong>maltodextrin has a glycemic index of roughly 85&ndash;105</strong> &mdash; higher than
+        table sugar at 65, and comparable to pure glucose at 100 &mdash; yet it is not counted as
+        &ldquo;added sugar&rdquo; on the nutrition panel. Modified starches behave similarly.
+      </p>
+      <p class="hint">
+        Net carbs subtract fiber from total carbohydrate, which follows the US label convention.
+        Products with EU labels already exclude fiber from carbohydrate, so their net carbs may read low.
+        Figures are estimates, not medical advice.
+      </p>
+    </div>
+  </section>
+</main>
+
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="lib.js"></script>
+<script src="store.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
