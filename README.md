@@ -199,18 +199,42 @@ This app is a thin layer over [Open Food Facts](https://world.openfoodfacts.org/
 Every barcode you scan, every ingredient list it reads, every NOVA processing score
 it shows, and the additive data behind the flags — all of it comes from their
 database. Without it there would be nothing here to build on. It is a free, open,
-non-profit project, and the product data is contributed by volunteers, photographed
-and typed in one label at a time.
+non-profit project, independent of the food industry, and its product data is
+contributed by volunteers, photographed and typed in one label at a time.
 
 That is also why this app has no subscription and never will: the data isn't ours to
 charge for.
 
-**If you get any use out of this, please consider supporting their work** — by
-[contributing](https://world.openfoodfacts.org/contribute), which can be as small as
-scanning a product they're missing or fixing an ingredient list, or by
-[donating](https://donate.openfoodfacts.org/). The database only stays good if people
-keep feeding it. When a barcode you scan comes back unknown, that's an invitation:
-add it there, and the next person finds it.
+**If you get any use out of this, please consider
+[contributing to Open Food Facts](https://world.openfoodfacts.org/contribute).**
+Money is only one way to help, and it isn't the most useful one for a database that
+grows by people scanning things:
+
+- **Add a missing product.** When a barcode comes back unknown in this app, that's an
+  invitation. Their [iPhone app](https://apps.apple.com/app/open-food-facts/id588797948)
+  scans the barcode and uploads photos of the label in about a minute, or you can
+  [add it on the website](https://world.openfoodfacts.org/cgi/product.pl?type=search_or_add&action=display).
+  The next person to scan that item finds it.
+- **Complete a product that's already there.** A NOVA processing score can only be
+  computed once a product has a category, an extracted ingredients list, and a filled-in
+  nutrition table — the exact three fields this app reads. Plenty of entries have a
+  label photo but none of them. There's a standing
+  [queue of products to be completed](https://world.openfoodfacts.org/state/to-be-completed),
+  and [instructions for helping](https://world.openfoodfacts.org/help-complete-products);
+  cropping an ingredients list out of a photo takes seconds, and their OCR does most of it.
+- **Improve data quality.** They run an ongoing
+  [data quality effort](https://wiki.openfoodfacts.org/Quality) that meets monthly.
+- **Translate.** The site, the app, and the ingredient/category taxonomies all need
+  [translators](https://wiki.openfoodfacts.org/Translations).
+- **Write code.** Everything is open source on
+  [GitHub](https://github.com/openfoodfacts) — the Perl/MongoDB backend, the JSON API
+  this app calls, the Flutter mobile app, and SDKs in many languages.
+- **Tell someone.** Say hello on their [Slack](https://slack.openfoodfacts.org/) or
+  just point a friend at the project.
+
+And if you'd rather support them financially, they run an annual fundraiser that pays
+for servers, the small permanent team, and staying independent of the food industry:
+**[Donate to Open Food Facts](https://world.openfoodfacts.org/donate-to-open-food-facts).**
 
 Product data is made available under the
 [Open Database License](https://opendatacommons.org/licenses/odbl/1-0/).
