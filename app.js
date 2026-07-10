@@ -165,6 +165,16 @@
     });
   }
 
+  /** Write an already-computed macro block straight into the diary. */
+  function addRawEntry(name, macros, extra) {
+    var entry = Object.assign({
+      date: viewDate, name: name, brand: "", code: "",
+      nova: null, flags: [], macros: macros,
+      loggedAt: new Date().toISOString()
+    }, extra || {});
+    return S.put("entries", entry).then(renderToday);
+  }
+
   function addEntry(p, grams) {
     var entry = {
       date: viewDate,
@@ -400,6 +410,67 @@
     fr.readAsText(file);
   }
 
+  // ----------------------------------------------------------- add sheet
+  function openSheet() {
+    $("sheetDate").textContent = viewDate === today() ? "today" : viewDate;
+    $("addSheet").classList.remove("hidden");
+    $("sheetBackdrop").classList.remove("hidden");
+    // always reopen in the collapsed state
+    $("savedPicker").classList.add("hidden");
+    $("quickForm").classList.add("hidden");
+    status($("quickStatus"), "", "");
+  }
+
+  function closeSheet() {
+    $("addSheet").classList.add("hidden");
+    $("sheetBackdrop").classList.add("hidden");
+  }
+
+  /** Saved foods, rendered inside the sheet so you never leave the diary. */
+  function showSavedPicker() {
+    $("quickForm").classList.add("hidden");
+    $("savedPicker").classList.remove("hidden");
+    S.getAll("foods").then(function (foods) {
+      $("savedPickerEmpty").classList.toggle("hidden", foods.length > 0);
+      $("savedPickerList").innerHTML = foods.map(function (f) {
+        var m = L.macrosForGrams(f.per100, f.servingGrams);
+        return '<div class="item">' +
+          '<div class="top"><span class="nm">' + esc(f.name) + "</span>" +
+            '<span class="sub">' + esc(f.servingLabel || fmt(f.servingGrams, 0) + " g") + "</span></div>" +
+          '<div class="macros">net carbs <b>' + fmt(m.netCarb, 1) + " g</b> &middot; fat <b>" +
+            fmt(m.fat, 1) + " g</b> &middot; protein <b>" + fmt(m.protein, 1) + " g</b></div>" +
+          '<div class="acts"><button class="primary tiny" data-sheetlog="' + esc(f.id) +
+            '">Log a serving</button></div>' +
+        "</div>";
+      }).join("");
+    });
+  }
+
+  function showQuickForm() {
+    $("savedPicker").classList.add("hidden");
+    $("quickForm").classList.remove("hidden");
+    $("qName").focus();
+  }
+
+  function submitQuickAdd() {
+    var name = $("qName").value.trim();
+    var g = parseFloat($("qGrams").value);
+    if (!name) { status($("quickStatus"), "Give it a name.", "err"); return; }
+    if (!(g > 0)) { status($("quickStatus"), "Enter the amount in grams.", "err"); return; }
+
+    var macros = L.quickEntryMacros(g, {
+      fat: parseFloat($("qFat").value) || 0,
+      carb: parseFloat($("qCarb").value) || 0,
+      fiber: parseFloat($("qFiber").value) || 0,
+      protein: parseFloat($("qProtein").value) || 0
+    });
+    addRawEntry(name, macros, { brand: "Quick add" }).then(function () {
+      ["qName", "qGrams", "qFat", "qCarb", "qFiber", "qProtein"]
+        .forEach(function (i) { $(i).value = ""; });
+      closeSheet();
+    });
+  }
+
   // ------------------------------------------------------------------ tabs
   function showTab(name) {
     document.querySelectorAll(".tab").forEach(function (t) {
@@ -408,6 +479,8 @@
     document.querySelectorAll(".panel").forEach(function (p) {
       p.classList.toggle("active", p.id === "panel-" + name);
     });
+    // The + only makes sense on the diary.
+    $("fabAdd").classList.toggle("hidden", name !== "today");
     if (name !== "scan" && scanner) stopScan();
   }
 
@@ -426,6 +499,18 @@
     $("btnLookup").addEventListener("click", function () { lookup($("manualCode").value); });
     $("manualCode").addEventListener("keydown", function (e) { if (e.key === "Enter") lookup($("manualCode").value); });
     $("btnAddFood").addEventListener("click", saveManualFood);
+
+    $("fabAdd").addEventListener("click", openSheet);
+    $("btnEmptyAdd").addEventListener("click", openSheet);
+    $("btnCloseSheet").addEventListener("click", closeSheet);
+    $("sheetBackdrop").addEventListener("click", closeSheet);
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") closeSheet();
+    });
+    $("actScan").addEventListener("click", function () { closeSheet(); showTab("scan"); });
+    $("actSaved").addEventListener("click", showSavedPicker);
+    $("actQuick").addEventListener("click", showQuickForm);
+    $("btnQuickAdd").addEventListener("click", submitQuickAdd);
     $("btnImportRecipe").addEventListener("click", importRecipe);
     $("btnSaveSettings").addEventListener("click", saveSettings);
     $("btnExport").addEventListener("click", doExport);
@@ -438,6 +523,7 @@
       if (b.dataset.del) S.del("entries", Number(b.dataset.del)).then(renderToday);
       else if (b.dataset.delfood) S.del("foods", b.dataset.delfood).then(renderFoods);
       else if (b.dataset.log) logFood(b.dataset.log);
+      else if (b.dataset.sheetlog) { closeSheet(); logFood(b.dataset.sheetlog); }
     });
 
     window.addEventListener("online", refreshOnlineBanner);

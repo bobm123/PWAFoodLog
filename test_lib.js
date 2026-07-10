@@ -93,6 +93,20 @@ console.log("\n-- unknown barcode --");
 ok("status 0 -> null", L.normalizeProduct({ status: 0 }) === null);
 ok("garbage -> null", L.normalizeProduct(null) === null);
 
+console.log("\n-- quickEntryMacros: one-off hand-typed diary entry --");
+const q = L.quickEntryMacros(150, { fat: 12, carb: 9, fiber: 3, protein: 20 });
+ok("grams carried", q.grams === 150);
+ok("netCarb = carb - fiber", close(q.netCarb, 6));
+ok("kcal null so Atwater is used later", q.kcal === null);
+ok("totals estimate kcal (12*9 + 6*4 + 20*4 = 212)",
+   close(L.dailyTotals([{ macros: q }]).kcal, 212));
+const qz = L.quickEntryMacros(100, {});
+ok("empty macros -> all zeros, no NaN", qz.fat === 0 && qz.netCarb === 0 && !isNaN(qz.protein));
+const qn = L.quickEntryMacros(100, { carb: 2, fiber: 9 });
+ok("fiber > carb never goes negative", qn.netCarb === 0);
+const qs = L.quickEntryMacros("150", { fat: "10" });
+ok("string inputs coerced", qs.grams === 150 && qs.fat === 10);
+
 console.log("\n-- barcodeVariants (UPC-A vs EAN-13 leading zero) --");
 const v12 = L.barcodeVariants("012345678905");
 ok("12-digit UPC tries padded 13-digit", v12.length === 2 && v12[1] === "0012345678905", v12.join("|"));

@@ -47,7 +47,10 @@
   <!-- ------------------------------ TODAY ------------------------------ -->
   <section id="panel-today" class="panel active">
     <div id="entryList" class="list"></div>
-    <p class="empty" id="todayEmpty">Nothing logged yet. Scan a barcode or add a food.</p>
+    <p class="empty" id="todayEmpty">
+      Nothing logged yet.<br>
+      <button id="btnEmptyAdd" class="primary" style="margin-top:.75rem">Add your first entry</button>
+    </p>
   </section>
 
   <!-- ------------------------------ SCAN ------------------------------- -->
@@ -155,6 +158,54 @@
     </div>
   </section>
 </main>
+
+<!-- Floating add button: only meaningful on the Today tab. -->
+<button id="fabAdd" class="fab" aria-label="Add an entry" title="Add an entry">+</button>
+
+<!-- Add-entry sheet -->
+<div id="sheetBackdrop" class="sheet-backdrop hidden"></div>
+<div id="addSheet" class="sheet hidden" role="dialog" aria-modal="true" aria-labelledby="addSheetTitle">
+  <div class="sheet-grab"></div>
+  <h2 id="addSheetTitle">Add to <span id="sheetDate">today</span></h2>
+
+  <button class="sheet-action" id="actScan">
+    <span class="sa-icon">[|||]</span>
+    <span class="sa-text"><b>Scan a barcode</b><small>Look it up on Open Food Facts</small></span>
+  </button>
+
+  <button class="sheet-action" id="actSaved">
+    <span class="sa-icon">&#9733;</span>
+    <span class="sa-text"><b>Saved food or recipe</b><small>Log a serving of something you've saved</small></span>
+  </button>
+
+  <button class="sheet-action" id="actQuick">
+    <span class="sa-icon">&#9998;</span>
+    <span class="sa-text"><b>Quick add</b><small>Type the macros once, don't save it</small></span>
+  </button>
+
+  <!-- inline saved-food picker -->
+  <div id="savedPicker" class="hidden">
+    <div id="savedPickerList" class="list"></div>
+    <p class="empty" id="savedPickerEmpty">No saved foods yet. Add one under Foods.</p>
+  </div>
+
+  <!-- inline quick-add form -->
+  <div id="quickForm" class="hidden">
+    <div class="grid2">
+      <label>What was it?<input id="qName" placeholder="Handful of almonds"></label>
+      <label>Amount (g)<input id="qGrams" type="number" step="any" placeholder="30"></label>
+      <label>Fat (g)<input id="qFat" type="number" step="any"></label>
+      <label>Carbs (g)<input id="qCarb" type="number" step="any"></label>
+      <label>Fiber (g)<input id="qFiber" type="number" step="any"></label>
+      <label>Protein (g)<input id="qProtein" type="number" step="any"></label>
+    </div>
+    <p class="hint">Amounts for the portion you actually ate. Net carbs = carbs &minus; fiber.</p>
+    <button id="btnQuickAdd" class="primary">Add to diary</button>
+    <p class="status" id="quickStatus"></p>
+  </div>
+
+  <button id="btnCloseSheet" class="ghost" style="width:100%;margin-top:.75rem">Cancel</button>
+</div>
 
 <!--
   Scanner library: prefer the vendored local copy so the app has no CDN

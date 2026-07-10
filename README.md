@@ -35,6 +35,9 @@ each hit `high` or `moderate` severity with a short explanation.
   12-digit UPC-A codes are automatically retried as 13-digit EAN-13.
 - **NOVA 1–4 processing badge** and **high-GI ingredient flags** on every product.
 - **Daily totals**: net carbs, fat, protein, calories, and a calorie split bar.
+- **A `+` on the diary** opening an add sheet: scan a barcode, log a serving of a
+  saved food, or **quick-add** a one-off entry by typing its macros without saving
+  a reusable food.
 - **Optional net-carb budget** (Settings) with an over-budget warning.
 - **Custom foods and recipes**, including direct import of
   `analyze_recipe.py --json` output from the sibling `keto-recipe-analyzer` skill.

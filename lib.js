@@ -157,6 +157,27 @@
     };
   }
 
+  /**
+   * Macros for a one-off diary entry, where the person types the amounts for
+   * the portion they actually ate rather than a per-100 g label.
+   *
+   * kcal is deliberately left null so dailyTotals() applies the Atwater
+   * estimate; a hand-typed entry has no label calories to preserve.
+   */
+  function quickEntryMacros(grams, m) {
+    m = m || {};
+    var carb = num(m.carb), fiber = num(m.fiber);
+    return {
+      grams: num(grams),
+      fat: num(m.fat),
+      carb: carb,
+      fiber: fiber,
+      protein: num(m.protein),
+      netCarb: netCarbs(carb, fiber),
+      kcal: null
+    };
+  }
+
   /** kcal from macros when the label doesn't give it (4/4/9, net carbs). */
   function estimateKcal(m) {
     return num(m.fat) * 9 + num(m.netCarb) * 4 + num(m.protein) * 4;
@@ -351,6 +372,7 @@
     normalizeProduct: normalizeProduct,
     netCarbs: netCarbs,
     macrosForGrams: macrosForGrams,
+    quickEntryMacros: quickEntryMacros,
     estimateKcal: estimateKcal,
     dailyTotals: dailyTotals,
     recipeFromAnalyzerJson: recipeFromAnalyzerJson,
