@@ -33,11 +33,26 @@ each hit `high` or `moderate` severity with a short explanation.
 
 - **Barcode scanning** with the phone camera, plus manual barcode entry as a fallback.
   12-digit UPC-A codes are automatically retried as 13-digit EAN-13.
+- **Search by name** on the Find tab — log "greek yogurt" without a barcode.
+  Online it queries Open Food Facts; offline (or when the network fails) it
+  falls back to searching your saved foods and previously scanned products,
+  and says so. A search hit you open is cached like a scan, so it resolves
+  offline afterwards.
 - **NOVA 1–4 processing badge** and **high-GI ingredient flags** on every product.
+- **Meals**: every entry belongs to breakfast, lunch, dinner or a snack
+  (defaulted from the time of day), and the diary groups entries by meal with
+  per-meal subtotals. Entries from before meals existed appear under "Other".
 - **Daily totals**: net carbs, fat, protein, calories, and a calorie split bar.
-- **A `+` on the diary** opening an add sheet: scan a barcode, log a serving of a
-  saved food, or **quick-add** a one-off entry by typing its macros without saving
-  a reusable food.
+- **A `+` on the diary** opening an add sheet: pick the meal, scan a barcode,
+  search by name, log a serving of a saved food, **quick-add** a one-off entry
+  by typing its macros — or re-log any of your **recent items in one tap**.
+- **Edit in place / log again**: fix an entry's portion (macros rescale
+  proportionally) or meal without re-entering it, and repeat any past entry
+  onto the day you're viewing.
+- **History tab**: the last 14 or 30 days of net carbs and calories as
+  charts, your net-carb budget drawn as a reference line with over-budget
+  days in red, a days-under-budget streak, and averages over logged days.
+  Tap any bar to open that day in the diary.
 - **Optional net-carb budget** (Settings) with an over-budget warning.
 - **Custom foods and recipes**, including direct import of
   `analyze_recipe.py --json` output from the sibling `keto-recipe-analyzer` skill.
@@ -59,7 +74,11 @@ network at all:
 | Custom foods and imported recipes | Yes |
 | Export / import JSON | Yes |
 | Scan a barcode you've scanned before | Yes — served from the on-device product cache |
+| Meal grouping, edit portion, log again, recents | Yes |
+| History charts and streak | Yes |
+| Search saved foods & previously scanned products by name | Yes — automatic fallback |
 | Scan a **new** barcode | Needs a connection |
+| Search Open Food Facts by name | Needs a connection (falls back to on-device matches) |
 
 Lookups are bounded by an **8-second timeout** (`LOOKUP_TIMEOUT_MS` in `app.js`)
 via `AbortController`, because `fetch()` has no timeout of its own and will
@@ -89,7 +108,8 @@ git add vendor/html5-qrcode.min.js && git commit -m "vendor scanner"
 ```
 
 Commit the vendored file — a deployed copy without it silently falls back to the CDN.
-After vendoring, the only external call left is the Open Food Facts lookup itself.
+After vendoring, the only external calls left are the Open Food Facts barcode
+lookup and name search.
 
 ## Deploying (required for camera scanning)
 
@@ -165,6 +185,12 @@ foodlog-pwa/
 ├── test_lib.js             Node tests: parsing, macros, GI watchlist, recipe import.
 ├── test_offline.js         Node tests: every lookup failure mode (timeout, offline,
 │                             cache fallback, unknown barcode).
+├── test_features.js        Node tests: meals, portion rescaling, recents, history
+│                             totals and streak, and every name-search failure mode.
+├── smoke.js                Headless-browser end-to-end test (dev only; needs
+│                             `npm i playwright`). Drives the real UI: add sheet,
+│                             meal groups, edit/log-again, search online + offline,
+│                             History charts.
 │
 ├── serve.py                Local dev server on localhost (a secure context, so the
 │                             camera and service worker both work).
@@ -189,8 +215,10 @@ tests that run under plain Node. `app.js` only moves data between `lib.js`,
 Run the tests with:
 
 ```bash
-node test_lib.js       # 38 assertions: parsing, macros, GI watchlist, recipe import
-node test_offline.js   # 29 assertions: timeout, offline, cache fallback, not-found
+node test_lib.js        # 45 assertions: parsing, macros, GI watchlist, recipe import
+node test_offline.js    # 29 assertions: timeout, offline, cache fallback, not-found
+node test_features.js   # 69 assertions: meals, rescaling, recents, history, search
+node smoke.js           # optional end-to-end run in headless Chromium (npm i playwright)
 ```
 
 ## Adding to the watchlist

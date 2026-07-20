@@ -38,7 +38,8 @@
 
 <nav class="tabs" role="tablist">
   <button class="tab active" data-tab="today" role="tab">Today</button>
-  <button class="tab" data-tab="scan" role="tab">Scan</button>
+  <button class="tab" data-tab="scan" role="tab">Find</button>
+  <button class="tab" data-tab="history" role="tab">History</button>
   <button class="tab" data-tab="foods" role="tab">Foods</button>
   <button class="tab" data-tab="settings" role="tab">Settings</button>
 </nav>
@@ -68,7 +69,43 @@
       </div>
       <p class="status" id="scanStatus"></p>
     </div>
+
+    <div class="card">
+      <h2>Search by name</h2>
+      <div class="row">
+        <input id="searchQuery" placeholder="e.g. greek yogurt" aria-label="Search foods by name">
+        <button id="btnSearch" class="primary">Search</button>
+      </div>
+      <p class="hint">Searches Open Food Facts. Offline it searches your saved foods and previously scanned products instead.</p>
+      <p class="status" id="searchStatus"></p>
+      <div id="searchResults" class="list"></div>
+    </div>
+
     <div id="productCard"></div>
+  </section>
+
+  <!-- ----------------------------- HISTORY ----------------------------- -->
+  <section id="panel-history" class="panel">
+    <div class="card">
+      <div class="top" style="display:flex;justify-content:space-between;align-items:center">
+        <h2 style="margin:0">Net carbs</h2>
+        <div class="seg" role="group" aria-label="Range">
+          <button class="seg-btn active" data-range="14">14 days</button>
+          <button class="seg-btn" data-range="30">30 days</button>
+        </div>
+      </div>
+      <p class="hint" id="streakLine"></p>
+      <div id="carbChart" class="chartwrap"></div>
+      <p class="hint" id="carbChartHint">Tap a bar to open that day in the diary.</p>
+    </div>
+    <div class="card">
+      <h2>Calories</h2>
+      <div id="kcalChart" class="chartwrap"></div>
+    </div>
+    <div class="card">
+      <div class="histstats" id="histStats"></div>
+      <p class="hint">Averages count logged days only.</p>
+    </div>
   </section>
 
   <!-- ------------------------------ FOODS ------------------------------ -->
@@ -168,6 +205,13 @@
   <div class="sheet-grab"></div>
   <h2 id="addSheetTitle">Add to <span id="sheetDate">today</span></h2>
 
+  <div class="seg seg-meals" id="mealSeg" role="group" aria-label="Meal">
+    <button class="seg-btn" data-meal="breakfast">Breakfast</button>
+    <button class="seg-btn" data-meal="lunch">Lunch</button>
+    <button class="seg-btn" data-meal="dinner">Dinner</button>
+    <button class="seg-btn" data-meal="snack">Snack</button>
+  </div>
+
   <button class="sheet-action" id="actScan">
     <span class="sa-icon">[|||]</span>
     <span class="sa-text"><b>Scan a barcode</b><small>Look it up on Open Food Facts</small></span>
@@ -178,10 +222,21 @@
     <span class="sa-text"><b>Saved food or recipe</b><small>Log a serving of something you've saved</small></span>
   </button>
 
+  <button class="sheet-action" id="actSearch">
+    <span class="sa-icon">&#128269;</span>
+    <span class="sa-text"><b>Search by name</b><small>Find it on Open Food Facts without a barcode</small></span>
+  </button>
+
   <button class="sheet-action" id="actQuick">
     <span class="sa-icon">&#9998;</span>
     <span class="sa-text"><b>Quick add</b><small>Type the macros once, don't save it</small></span>
   </button>
+
+  <!-- one-tap re-log of recently logged items -->
+  <div id="recentWrap" class="hidden">
+    <p class="sheet-sub">Recent</p>
+    <div id="recentList" class="list"></div>
+  </div>
 
   <!-- inline saved-food picker -->
   <div id="savedPicker" class="hidden">

@@ -87,6 +87,19 @@
     });
   }
 
+  /** Entries for an inclusive YYYY-MM-DD range (for the History tab). */
+  function entriesForRange(start, end) {
+    return open().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var t = db.transaction("entries", "readonly");
+        var idx = t.objectStore("entries").index("date");
+        var req = idx.getAll(IDBKeyRange.bound(start, end));
+        req.onsuccess = function () { resolve(req.result || []); };
+        req.onerror = function () { reject(req.error); };
+      });
+    });
+  }
+
   function getSetting(key, fallback) {
     return tx("settings", "readonly", function (s) { return s.get(key); })
       .then(function (r) { return r && r.value !== undefined ? r.value : fallback; });
@@ -106,6 +119,14 @@
     return put("products", {
       code: String(code), product: product, cachedAt: new Date().toISOString()
     });
+  }
+
+  /** Every cached product (the corpus for offline name search). */
+  function getAllCachedProducts() {
+    return getAll("products").then(function (rows) {
+      return (rows || []).map(function (r) { return r && r.product; })
+        .filter(function (p) { return !!p; });
+    }, function () { return []; });
   }
 
   /** Ask the browser not to evict us. Best-effort. */
@@ -163,8 +184,9 @@
 
   root.Store = {
     open: open, getAll: getAll, put: put, del: del, clear: clear,
-    entriesForDate: entriesForDate,
+    entriesForDate: entriesForDate, entriesForRange: entriesForRange,
     getCachedProduct: getCachedProduct, putCachedProduct: putCachedProduct,
+    getAllCachedProducts: getAllCachedProducts,
     getSetting: getSetting, setSetting: setSetting,
     requestPersistence: requestPersistence,
     exportAll: exportAll, importAll: importAll

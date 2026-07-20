@@ -249,6 +249,207 @@
     };
   }
 
+  // ------------------------------------------------------------------ meals
+  var MEALS = ["breakfast", "lunch", "dinner", "snack"];
+  var MEAL_LABELS = {
+    breakfast: "Breakfast", lunch: "Lunch", dinner: "Dinner",
+    snack: "Snacks", other: "Other"
+  };
+
+  /** Default meal for a new entry from the hour of day (0-23). */
+  function guessMeal(hour) {
+    var h = num(hour);
+    if (h >= 4 && h < 11) return "breakfast";
+    if (h >= 11 && h < 15) return "lunch";
+    if (h >= 17 && h < 21) return "dinner";
+    return "snack";
+  }
+
+  /**
+   * Group a day's entries by meal in fixed display order. Entries with no
+   * meal (logged before meals existed) land in "other". Empty groups are
+   * omitted. Each group carries its own dailyTotals() for subtotals.
+   */
+  function groupByMeal(entries) {
+    var order = MEALS.concat(["other"]);
+    var by = {};
+    (entries || []).forEach(function (e) {
+      var m = (e && MEAL_LABELS[e.meal]) ? e.meal : "other";
+      (by[m] = by[m] || []).push(e);
+    });
+    return order.filter(function (m) { return by[m]; }).map(function (m) {
+      return { meal: m, label: MEAL_LABELS[m], entries: by[m], totals: dailyTotals(by[m]) };
+    });
+  }
+
+  // ------------------------------------------------------------- re-logging
+  /**
+   * Rescale a logged entry's macro block to a new gram weight. Entries store
+   * only the totals for the portion eaten, so scaling is proportional to the
+   * original weight. Returns null when either weight is unusable.
+   */
+  function scaleMacros(macros, newGrams) {
+    var m = macros || {};
+    var oldG = num(m.grams), g = num(newGrams);
+    if (!(oldG > 0) || !(g > 0)) return null;
+    var f = g / oldG;
+    var carb = num(m.carb) * f, fiber = num(m.fiber) * f;
+    return {
+      grams: g,
+      fat: num(m.fat) * f,
+      carb: carb,
+      fiber: fiber,
+      protein: num(m.protein) * f,
+      netCarb: netCarbs(carb, fiber),
+      kcal: (m.kcal !== null && m.kcal !== undefined) ? num(m.kcal) * f : null
+    };
+  }
+
+  /**
+   * Most recently logged distinct items, newest first, for one-tap
+   * re-logging. Dedupes by barcode when present, else by lowercased name.
+   */
+  function recentFoods(entries, limit) {
+    var sorted = (entries || []).slice().sort(function (a, b) {
+      return String(b.loggedAt || "").localeCompare(String(a.loggedAt || ""));
+    });
+    var seen = {}, out = [];
+    for (var i = 0; i < sorted.length && out.length < (limit || 8); i++) {
+      var e = sorted[i];
+      if (!e || !e.macros || !(num(e.macros.grams) > 0)) continue;
+      var key = e.code ? "c:" + e.code : "n:" + String(e.name || "").toLowerCase();
+      if (seen[key]) continue;
+      seen[key] = true;
+      out.push({
+        name: e.name, brand: e.brand || "", code: e.code || "",
+        nova: e.nova || null, flags: e.flags || [], macros: e.macros
+      });
+    }
+    return out;
+  }
+
+  // --------------------------------------------------------------- history
+  /** The `days` dates ending at endDate (YYYY-MM-DD), oldest first. */
+  function dateRange(endDate, days) {
+    var end = new Date(endDate + "T12:00:00Z"); // noon UTC dodges DST edges
+    var out = [];
+    for (var i = days - 1; i >= 0; i--) {
+      out.push(new Date(end.getTime() - i * 86400000).toISOString().slice(0, 10));
+    }
+    return out;
+  }
+
+  /** Per-day totals for a date range, zero-filled for days with no entries. */
+  function historyDays(entries, dates) {
+    var byDate = {};
+    (entries || []).forEach(function (e) {
+      (byDate[e.date] = byDate[e.date] || []).push(e);
+    });
+    return (dates || []).map(function (d) {
+      return { date: d, totals: dailyTotals(byDate[d] || []) };
+    });
+  }
+
+  /**
+   * Consecutive days at or under the net-carb budget, counting back from the
+   * end of `days` (oldest-first). An unlogged day is unknown, not a success,
+   * so it breaks the streak -- except the final day, which is skipped while
+   * it has nothing logged yet.
+   */
+  function streakUnderBudget(days, target) {
+    if (!(target > 0)) return 0;
+    var i = (days || []).length - 1;
+    if (i >= 0 && days[i].totals.count === 0) i--;   // today not logged yet
+    var n = 0;
+    for (; i >= 0; i--) {
+      var t = days[i].totals;
+      if (t.count > 0 && t.netCarb <= target) n++;
+      else break;
+    }
+    return n;
+  }
+
+  // ---------------------------------------------------------------- search
+  /** Normalize one page of OFF search results into internal product shape. */
+  function normalizeSearchResults(json) {
+    var list = (json && json.products) || [];
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      var p = normalizeProduct({ status: 1, code: list[i].code, product: list[i] });
+      if (p && p.code) out.push(p);
+    }
+    return out;
+  }
+
+  var SEARCH_ERR_MESSAGE = {
+    offline: "You're offline - showing matches saved on this device only.",
+    timeout: "Open Food Facts search didn't respond - showing matches saved on this device.",
+    network: "Couldn't reach Open Food Facts - showing matches saved on this device.",
+    empty: "No products matched. Try fewer words, or scan the barcode."
+  };
+
+  /**
+   * Substring search over what is already on the device: saved foods and
+   * recipes, plus the cached-product mirror. Saved foods first; a cached
+   * product that duplicates a saved food's barcode is dropped.
+   */
+  function searchLocal(query, foods, cachedProducts) {
+    var q = String(query || "").trim().toLowerCase();
+    if (q.length < 2) return [];
+    function matches(name, brand) {
+      return (String(name || "") + " " + String(brand || "")).toLowerCase().indexOf(q) !== -1;
+    }
+    var out = [], seenCodes = {};
+    (foods || []).forEach(function (f) {
+      if (!f || !matches(f.name, f.brand)) return;
+      if (f.code) seenCodes[f.code] = true;
+      out.push({ kind: "food", item: f });
+    });
+    (cachedProducts || []).forEach(function (p) {
+      if (!p || !matches(p.name, p.brand)) return;
+      if (p.code && seenCodes[p.code]) return;
+      out.push({ kind: "cached", item: p });
+    });
+    return out;
+  }
+
+  /**
+   * Offline-tolerant name search. Mirrors lookupProduct(): never rejects,
+   * always resolves to { products, source, error, message }. On any network
+   * failure it falls back to deps.getLocal(query) so a search still surfaces
+   * whatever matches on the device.
+   *
+   * deps = {
+   *   fetchJson(url) -> Promise<json>
+   *   isOnline() -> boolean
+   *   getLocal(query) -> Promise<product[]>   (optional)
+   * }
+   */
+  function searchProducts(deps, query) {
+    query = String(query || "").trim();
+    if (query.length < 2) {
+      return Promise.resolve({ products: [], source: null, error: null, message: null });
+    }
+    function localOnly(reason) {
+      var get = deps.getLocal || function () { return Promise.resolve([]); };
+      return Promise.resolve().then(function () { return get(query); }).then(function (items) {
+        return { products: items || [], source: "local", error: reason,
+                 message: SEARCH_ERR_MESSAGE[reason] };
+      }, function () {
+        return { products: [], source: "local", error: reason,
+                 message: SEARCH_ERR_MESSAGE[reason] };
+      });
+    }
+    if (!deps.isOnline()) return localOnly(ERR.OFFLINE);
+    return deps.fetchJson(API.OFF_SEARCH_URL(query)).then(function (json) {
+      var products = normalizeSearchResults(json);
+      return { products: products, source: "network", error: null,
+               message: products.length ? null : SEARCH_ERR_MESSAGE.empty };
+    }, function (err) {
+      return localOnly(isTimeoutError(err) ? ERR.TIMEOUT : ERR.NETWORK);
+    });
+  }
+
   /**
    * Barcode forms to try, in order. A US UPC-A is printed as 12 digits but is
    * frequently stored in Open Food Facts as the 13-digit EAN with a leading
@@ -377,9 +578,29 @@
     dailyTotals: dailyTotals,
     recipeFromAnalyzerJson: recipeFromAnalyzerJson,
     barcodeVariants: barcodeVariants,
+    MEALS: MEALS,
+    MEAL_LABELS: MEAL_LABELS,
+    guessMeal: guessMeal,
+    groupByMeal: groupByMeal,
+    scaleMacros: scaleMacros,
+    recentFoods: recentFoods,
+    dateRange: dateRange,
+    historyDays: historyDays,
+    streakUnderBudget: streakUnderBudget,
+    normalizeSearchResults: normalizeSearchResults,
+    SEARCH_ERR_MESSAGE: SEARCH_ERR_MESSAGE,
+    searchLocal: searchLocal,
+    searchProducts: searchProducts,
     OFF_URL: function (code) {
       return "https://world.openfoodfacts.org/api/v2/product/" +
         encodeURIComponent(code) + ".json";
+    },
+    OFF_SEARCH_URL: function (q) {
+      return "https://world.openfoodfacts.org/cgi/search.pl?action=process&json=1" +
+        "&search_simple=1&page_size=20&sort_by=unique_scans_n" +
+        "&fields=code,product_name,brands,image_front_small_url,nutriments," +
+        "serving_size,serving_quantity,nova_group,additives_tags,ingredients_text" +
+        "&search_terms=" + encodeURIComponent(q);
     }
   };
 

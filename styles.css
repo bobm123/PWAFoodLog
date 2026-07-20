@@ -35,7 +35,7 @@ h2{font-size:1rem;margin:0 0 .5rem}
 .sfat{background:var(--fat)} .scarb{background:var(--carb)} .sprot{background:var(--prot)}
 .splitlabel{margin:.35rem 1rem .5rem;font-size:.72rem;color:var(--dim);text-align:center}
 
-.tabs{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--line)}
+.tabs{display:grid;grid-template-columns:repeat(5,1fr);border-bottom:1px solid var(--line)}
 .tab{
   background:none;border:0;color:var(--dim);padding:.7rem 0;font-size:.9rem;
   border-bottom:2px solid transparent;cursor:pointer;
@@ -166,3 +166,47 @@ button:disabled{opacity:.5}
 
 /* keep the last diary row clear of the floating + */
 #panel-today{padding-bottom:5.5rem}
+
+/* ---- segmented controls (meal picker, history range) ---- */
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg-btn{
+  flex:1;background:transparent;border:0;border-radius:0;color:var(--dim);
+  padding:.45rem .5rem;font-size:.78rem;
+}
+.seg-btn+.seg-btn{border-left:1px solid var(--line)}
+.seg-btn.active{background:var(--green);color:#06160e;font-weight:600}
+.seg-meals{margin-bottom:.75rem}
+
+/* ---- meal group headers in the diary ---- */
+.mealhead{
+  display:flex;justify-content:space-between;align-items:baseline;
+  margin:.9rem .1rem .35rem;font-size:.8rem;
+}
+.mealhead:first-child{margin-top:.1rem}
+.mealhead b{font-size:.85rem;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
+.mealhead .sub{font-size:.72rem;color:var(--dim)}
+
+/* ---- inline entry editor ---- */
+.editrow{display:flex;gap:.4rem;align-items:center;margin-top:.5rem;flex-wrap:wrap}
+.editrow input{max-width:6rem}
+.editrow select{width:auto}
+
+/* ---- search results ---- */
+#searchResults .item{cursor:pointer}
+#searchResults .item:active{background:#111614}
+.srcnote{font-size:.68rem;color:var(--dim);border:1px solid var(--line);border-radius:999px;padding:.1rem .4rem}
+
+/* ---- history charts ---- */
+.chartwrap{margin-top:.5rem}
+.chartwrap svg{width:100%;height:auto;display:block}
+.chartwrap .bar{cursor:pointer}
+.chartwrap .axis{fill:var(--dim);font-size:9px}
+.histstats{display:grid;grid-template-columns:repeat(2,1fr);gap:.6rem}
+.histstats .tot{background:#0d100f;border:1px solid var(--line);border-radius:10px;padding:.6rem .4rem}
+
+/* ---- add-sheet recents ---- */
+.sheet-sub{
+  font-size:.72rem;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;
+  margin:.85rem 0 .4rem;
+}
+#recentList .item{padding:.5rem .7rem}

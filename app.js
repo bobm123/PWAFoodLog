@@ -11,6 +11,12 @@
   var carbTarget = null;
   var lastCode = null;                 // for the Retry button
   var LOOKUP_TIMEOUT_MS = 8000;        // bad wireless shouldn't hang forever
+  var currentMeal = null;              // meal selected in the add sheet
+  var lastSearchResults = [];          // rendered search hits, by index
+  var editingEntryId = null;           // entry with the inline editor open
+  var historyRange = 14;               // 14 or 30 days
+
+  function nowMeal() { return L.guessMeal(new Date().getHours()); }
 
   /**
    * fetch() has no timeout of its own: on a weak signal it can hang until the
@@ -35,6 +41,22 @@
     getCached: function (code) { return S.getCachedProduct(code); },
     putCached: function (code, p) { return S.putCachedProduct(code, p); },
     isOnline: function () { return navigator.onLine !== false; }
+  };
+
+  var searchDeps = {
+    fetchJson: fetchJson,
+    isOnline: function () { return navigator.onLine !== false; },
+    // Offline / failed-network fallback: whatever matches on the device.
+    getLocal: function (q) {
+      return Promise.all([S.getAll("foods"), S.getAllCachedProducts()])
+        .then(function (r) {
+          return L.searchLocal(q, r[0], r[1]).map(function (hit) {
+            var p = hit.item;
+            p._localKind = hit.kind;   // "food" | "cached", for the badge
+            return p;
+          });
+        });
+    }
   };
 
   function today() {
@@ -110,25 +132,86 @@
   }
 
   // ----------------------------------------------------------------- today
+  function renderEntry(e) {
+    var m = e.macros;
+    var kcal = (m.kcal != null) ? m.kcal : L.estimateKcal(m);
+    var editing = editingEntryId === e.id;
+    return '<div class="item">' +
+      '<div class="top"><span class="nm">' + esc(e.name) + "</span>" +
+      '<span class="sub">' + fmt(m.grams, 0) + " g</span></div>" +
+      (e.brand ? '<div class="sub">' + esc(e.brand) + "</div>" : "") +
+      '<div class="macros">net carbs <b>' + fmt(m.netCarb, 1) + " g</b> &middot; fat <b>" +
+        fmt(m.fat, 1) + " g</b> &middot; protein <b>" + fmt(m.protein, 1) +
+        " g</b> &middot; <b>" + fmt(kcal, 0) + "</b> kcal</div>" +
+      '<div class="badges">' + novaBadge(e.nova) + flagBadges(e.flags) + "</div>" +
+      (editing
+        ? '<div class="editrow">' +
+            '<input id="editGrams" type="number" step="any" value="' + fmt(m.grams, 0) +
+              '" aria-label="New amount in grams">' +
+            '<select id="editMeal" aria-label="Meal">' + mealOptions(e.meal) + "</select>" +
+            '<button class="primary tiny" data-saveedit="' + e.id + '">Save</button>' +
+            '<button class="ghost tiny" data-canceledit="1">Cancel</button>' +
+          "</div>"
+        : '<div class="acts">' +
+            '<button class="ghost tiny" data-edit="' + e.id + '">Edit</button>' +
+            '<button class="ghost tiny" data-again="' + e.id + '">Log again</button>' +
+            '<button class="ghost tiny" data-del="' + e.id + '">Remove</button>' +
+          "</div>") +
+      "</div>";
+  }
+
+  function mealOptions(selected) {
+    return L.MEALS.map(function (m) {
+      return '<option value="' + m + '"' + (m === selected ? " selected" : "") + ">" +
+        esc(L.MEAL_LABELS[m]) + "</option>";
+    }).join("");
+  }
+
   function renderToday() {
     return S.entriesForDate(viewDate).then(function (entries) {
-      var list = $("entryList");
-      list.innerHTML = entries.map(function (e) {
-        var m = e.macros;
-        var kcal = (m.kcal != null) ? m.kcal : L.estimateKcal(m);
-        return '<div class="item">' +
-          '<div class="top"><span class="nm">' + esc(e.name) + "</span>" +
-          '<span class="sub">' + fmt(m.grams, 0) + " g</span></div>" +
-          (e.brand ? '<div class="sub">' + esc(e.brand) + "</div>" : "") +
-          '<div class="macros">net carbs <b>' + fmt(m.netCarb, 1) + " g</b> &middot; fat <b>" +
-            fmt(m.fat, 1) + " g</b> &middot; protein <b>" + fmt(m.protein, 1) +
-            " g</b> &middot; <b>" + fmt(kcal, 0) + "</b> kcal</div>" +
-          '<div class="badges">' + novaBadge(e.nova) + flagBadges(e.flags) + "</div>" +
-          '<div class="acts"><button class="ghost tiny" data-del="' + e.id + '">Remove</button></div>' +
-          "</div>";
+      var groups = L.groupByMeal(entries);
+      $("entryList").innerHTML = groups.map(function (g) {
+        var showHead = !(groups.length === 1 && g.meal === "other");
+        return (showHead
+          ? '<div class="mealhead"><b>' + esc(g.label) + "</b><span class=\"sub\">" +
+            fmt(g.totals.netCarb, 1) + " g net &middot; " + fmt(g.totals.kcal, 0) + " kcal</span></div>"
+          : "") + g.entries.map(renderEntry).join("");
       }).join("");
       $("todayEmpty").classList.toggle("hidden", entries.length > 0);
       renderTotals(entries);
+    });
+  }
+
+  function startEditEntry(id) {
+    editingEntryId = id;
+    renderToday();
+  }
+
+  function saveEditEntry(id) {
+    var g = parseFloat($("editGrams").value);
+    var meal = $("editMeal").value;
+    return S.entriesForDate(viewDate).then(function (entries) {
+      var e = entries.filter(function (x) { return x.id === id; })[0];
+      if (!e) { editingEntryId = null; return renderToday(); }
+      var scaled = L.scaleMacros(e.macros, g);
+      if (scaled) e.macros = scaled;      // bad grams -> keep old amounts
+      e.meal = meal;
+      return S.put("entries", e).then(function () {
+        editingEntryId = null;
+        return renderToday();
+      });
+    });
+  }
+
+  /** Re-log a past entry as a fresh row on the day being viewed. */
+  function logAgain(id) {
+    return S.entriesForDate(viewDate).then(function (entries) {
+      var e = entries.filter(function (x) { return x.id === id; })[0];
+      if (!e) return;
+      return addRawEntry(e.name, e.macros, {
+        brand: e.brand, code: e.code, nova: e.nova, flags: e.flags,
+        meal: nowMeal()
+      });
     });
   }
 
@@ -152,6 +235,7 @@
       flagWarnBox(p.flags) +
       '<div class="row" style="margin-top:.7rem">' +
         '<input id="portion" type="number" step="any" value="' + serving + '" aria-label="Portion in grams">' +
+        '<select id="portionMeal" aria-label="Meal">' + mealOptions(currentMeal || nowMeal()) + "</select>" +
         '<button id="btnAddEntry" class="primary">Add to ' +
           (viewDate === today() ? "today" : esc(viewDate)) + "</button>" +
       "</div>" +
@@ -161,7 +245,7 @@
     $("btnAddEntry").addEventListener("click", function () {
       var g = parseFloat($("portion").value);
       if (!(g > 0)) return;
-      addEntry(p, g);
+      addEntry(p, g, $("portionMeal").value);
     });
   }
 
@@ -170,12 +254,13 @@
     var entry = Object.assign({
       date: viewDate, name: name, brand: "", code: "",
       nova: null, flags: [], macros: macros,
+      meal: currentMeal || nowMeal(),
       loggedAt: new Date().toISOString()
     }, extra || {});
     return S.put("entries", entry).then(renderToday);
   }
 
-  function addEntry(p, grams) {
+  function addEntry(p, grams, meal) {
     var entry = {
       date: viewDate,
       name: p.name,
@@ -184,6 +269,7 @@
       nova: p.nova || null,
       flags: p.flags || [],
       macros: L.macrosForGrams(p.per100, grams),
+      meal: meal || currentMeal || nowMeal(),
       loggedAt: new Date().toISOString()
     };
     return S.put("entries", entry).then(function () {
@@ -280,6 +366,145 @@
     if (scanner) {
       scanner.stop().then(function () { scanner.clear(); scanner = null; }).catch(function () { scanner = null; });
     }
+  }
+
+  // ---------------------------------------------------------------- search
+  function doSearch() {
+    var q = $("searchQuery").value.trim();
+    if (q.length < 2) { status($("searchStatus"), "Type at least two characters.", "err"); return; }
+    $("btnSearch").disabled = true;
+    $("searchResults").innerHTML = "";
+    status($("searchStatus"), navigator.onLine === false
+      ? "Offline - searching foods saved on this device…"
+      : "Searching…");
+    L.searchProducts(searchDeps, q).then(function (r) {
+      $("btnSearch").disabled = false;
+      lastSearchResults = r.products;
+      status($("searchStatus"), r.message || "", r.error ? "warn" : "");
+      $("searchResults").innerHTML = r.products.map(function (p, i) {
+        var nc = L.netCarbs(p.per100.carb, p.per100.fiber);
+        var srcNote = p._localKind === "food" ? "saved food"
+                    : p._localKind === "cached" ? "scanned before" : "";
+        return '<div class="item" data-result="' + i + '" role="button" tabindex="0">' +
+          '<div class="top"><span class="nm">' + esc(p.name) + "</span>" +
+            (srcNote ? '<span class="srcnote">' + srcNote + "</span>" : "") + "</div>" +
+          (p.brand ? '<div class="sub">' + esc(p.brand) + "</div>" : "") +
+          '<div class="macros">per 100 g: net carbs <b>' + fmt(nc, 1) + " g</b>" +
+            (p.per100.kcal ? " &middot; <b>" + fmt(p.per100.kcal, 0) + "</b> kcal" : "") + "</div>" +
+          '<div class="badges">' + novaBadge(p.nova) + flagBadges(p.flags) + "</div>" +
+        "</div>";
+      }).join("");
+    });
+  }
+
+  function pickSearchResult(i) {
+    var p = lastSearchResults[i];
+    if (!p) return;
+    // Mirror a fresh network hit into the product cache, exactly like a
+    // successful scan, so it resolves offline (and in offline search) later.
+    if (!p._localKind && p.code) S.putCachedProduct(p.code, p);
+    // A previously-scanned product is a saved copy; a live hit is fresh.
+    renderProduct(p, p._localKind === "cached");
+    $("productCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  // --------------------------------------------------------------- history
+  /**
+   * Minimal single-series bar chart as an SVG string. One axis; thin bars
+   * with a gap; rounded value ends; recessive gridlines; the budget as a
+   * dashed reference line (position carries over/under -- the red fill is
+   * redundant, not the only encoding); full-height tap targets with a
+   * hover tooltip per day.
+   */
+  function barChart(days, opts) {
+    var W = 360, H = 150, padL = 34, padR = 8, padT = 14, padB = 20;
+    var iw = W - padL - padR, ih = H - padT - padB;
+    var n = days.length;
+    var vals = days.map(opts.value);
+    var max = Math.max.apply(null, vals.concat(opts.target || 0, 1)) * 1.1;
+    var y = function (v) { return padT + ih - (v / max) * ih; };
+    var slot = iw / n;
+    var barW = Math.max(2, slot - 2);
+    var MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    var DOW = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+    function fmtDay(dstr) {
+      var d = new Date(dstr + "T12:00:00Z");
+      return DOW[d.getUTCDay()] + " " + MONTHS[d.getUTCMonth()] + " " + d.getUTCDate();
+    }
+    var parts = [];
+    [max / 1.1, max / 2.2].forEach(function (v) {
+      parts.push('<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y(v) + '" y2="' + y(v) +
+        '" stroke="var(--line)" stroke-width="1"/>' +
+        '<text x="' + (padL - 4) + '" y="' + (y(v) + 3) + '" text-anchor="end" class="axis">' +
+        Math.round(v) + "</text>");
+    });
+    parts.push('<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + (padT + ih) +
+      '" y2="' + (padT + ih) + '" stroke="var(--line)"/>');
+    var step = Math.ceil(n / 7);
+    days.forEach(function (d, i) {
+      var v = vals[i];
+      var x = padL + i * slot + (slot - barW) / 2;
+      var over = opts.target && v > opts.target;
+      var fill = over ? "var(--red)" : (opts.color || "var(--green)");
+      if (v > 0) {
+        parts.push('<rect x="' + x + '" y="' + y(v) + '" width="' + barW + '" height="' +
+          Math.max(1, padT + ih - y(v)) + '" rx="2" fill="' + fill + '"/>');
+      }
+      var title = fmtDay(d.date) + " - " +
+        (d.totals.count ? fmt(v, opts.decimals) + " " + opts.unit : "nothing logged");
+      parts.push('<rect class="bar" data-day="' + d.date + '" x="' + (padL + i * slot) +
+        '" y="' + padT + '" width="' + slot + '" height="' + ih +
+        '" fill="transparent"><title>' + esc(title) + "</title></rect>");
+      if (i % step === 0) {
+        parts.push('<text x="' + (padL + i * slot + slot / 2) + '" y="' + (H - 6) +
+          '" text-anchor="middle" class="axis">' + Number(d.date.slice(8)) + "</text>");
+      }
+    });
+    if (opts.target) {
+      parts.push('<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y(opts.target) +
+        '" y2="' + y(opts.target) +
+        '" stroke="var(--fg)" stroke-dasharray="4 3" stroke-width="1" opacity=".7"/>' +
+        '<text x="' + (W - padR) + '" y="' + (y(opts.target) - 4) +
+        '" text-anchor="end" class="axis">budget ' + opts.target + " g</text>");
+    }
+    return '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="' +
+      esc(opts.unit + " per day, last " + n + " days") + '">' + parts.join("") + "</svg>";
+  }
+
+  function histStat(v, label) {
+    return '<div class="tot"><span class="tval">' + v + '</span><span class="tlab">' +
+      label + "</span></div>";
+  }
+
+  function renderHistory() {
+    var dates = L.dateRange(today(), historyRange);
+    return S.entriesForRange(dates[0], dates[dates.length - 1]).then(function (entries) {
+      var days = L.historyDays(entries, dates);
+      var streak = L.streakUnderBudget(days, carbTarget);
+      $("streakLine").textContent = carbTarget
+        ? (streak > 0
+            ? streak + (streak === 1 ? " day" : " days") + " in a row at or under " + carbTarget + " g."
+            : "No current under-budget streak (target " + carbTarget + " g).")
+        : "Set a net-carb budget in Settings to see a target line and streak.";
+      $("carbChart").innerHTML = barChart(days, {
+        value: function (d) { return d.totals.netCarb; },
+        unit: "g net carbs", decimals: 1, target: carbTarget || null
+      });
+      $("kcalChart").innerHTML = barChart(days, {
+        value: function (d) { return d.totals.kcal; },
+        unit: "kcal", decimals: 0, target: null, color: "var(--prot)"
+      });
+      var logged = days.filter(function (d) { return d.totals.count > 0; });
+      function avg(f) {
+        if (!logged.length) return 0;
+        return logged.reduce(function (s, d) { return s + f(d.totals); }, 0) / logged.length;
+      }
+      $("histStats").innerHTML =
+        histStat(fmt(avg(function (t) { return t.netCarb; }), 1) + " g", "avg net carbs") +
+        histStat(fmt(avg(function (t) { return t.kcal; }), 0), "avg kcal") +
+        histStat(logged.length + "/" + days.length, "days logged") +
+        histStat(carbTarget ? String(streak) : "&mdash;", "day streak under budget");
+    });
   }
 
   // ---------------------------------------------------------------- foods
@@ -411,6 +636,34 @@
   }
 
   // ----------------------------------------------------------- add sheet
+  var recentItems = [];
+
+  function setSheetMeal(meal) {
+    currentMeal = meal;
+    document.querySelectorAll("#mealSeg .seg-btn").forEach(function (b) {
+      b.classList.toggle("active", b.dataset.meal === meal);
+    });
+  }
+
+  /** One-tap re-log list: distinct items from the last two weeks. */
+  function renderRecents() {
+    var dates = L.dateRange(today(), 14);
+    S.entriesForRange(dates[0], dates[dates.length - 1]).then(function (entries) {
+      recentItems = L.recentFoods(entries, 6);
+      $("recentWrap").classList.toggle("hidden", recentItems.length === 0);
+      $("recentList").innerHTML = recentItems.map(function (f, i) {
+        var m = f.macros;
+        return '<div class="item">' +
+          '<div class="top"><span class="nm">' + esc(f.name) + "</span>" +
+            '<span class="sub">' + fmt(m.grams, 0) + " g</span></div>" +
+          '<div class="macros">net carbs <b>' + fmt(m.netCarb, 1) + " g</b> &middot; fat <b>" +
+            fmt(m.fat, 1) + " g</b> &middot; protein <b>" + fmt(m.protein, 1) + " g</b></div>" +
+          '<div class="acts"><button class="primary tiny" data-recent="' + i + '">Log</button></div>' +
+        "</div>";
+      }).join("");
+    });
+  }
+
   function openSheet() {
     $("sheetDate").textContent = viewDate === today() ? "today" : viewDate;
     $("addSheet").classList.remove("hidden");
@@ -419,6 +672,8 @@
     $("savedPicker").classList.add("hidden");
     $("quickForm").classList.add("hidden");
     status($("quickStatus"), "", "");
+    setSheetMeal(nowMeal());
+    renderRecents();
   }
 
   function closeSheet() {
@@ -482,6 +737,7 @@
     // The + only makes sense on the diary.
     $("fabAdd").classList.toggle("hidden", name !== "today");
     if (name !== "scan" && scanner) stopScan();
+    if (name === "history") renderHistory();
   }
 
   // ------------------------------------------------------------------ init
@@ -489,6 +745,7 @@
     $("dayPicker").value = viewDate;
     $("dayPicker").addEventListener("change", function (e) {
       viewDate = e.target.value || today();
+      editingEntryId = null;
       renderToday();
     });
     document.querySelectorAll(".tab").forEach(function (t) {
@@ -510,6 +767,40 @@
     $("actScan").addEventListener("click", function () { closeSheet(); showTab("scan"); });
     $("actSaved").addEventListener("click", showSavedPicker);
     $("actQuick").addEventListener("click", showQuickForm);
+    $("actSearch").addEventListener("click", function () {
+      closeSheet(); showTab("scan"); $("searchQuery").focus();
+    });
+    document.querySelectorAll("#mealSeg .seg-btn").forEach(function (b) {
+      b.addEventListener("click", function () { setSheetMeal(b.dataset.meal); });
+    });
+
+    $("btnSearch").addEventListener("click", doSearch);
+    $("searchQuery").addEventListener("keydown", function (e) { if (e.key === "Enter") doSearch(); });
+    $("searchResults").addEventListener("click", function (e) {
+      var it = e.target.closest && e.target.closest("[data-result]");
+      if (it) pickSearchResult(Number(it.dataset.result));
+    });
+
+    document.querySelectorAll("#panel-history .seg-btn").forEach(function (b) {
+      b.addEventListener("click", function () {
+        historyRange = Number(b.dataset.range) || 14;
+        document.querySelectorAll("#panel-history .seg-btn").forEach(function (x) {
+          x.classList.toggle("active", x === b);
+        });
+        renderHistory();
+      });
+    });
+    ["carbChart", "kcalChart"].forEach(function (id) {
+      $(id).addEventListener("click", function (e) {
+        var r = e.target.closest && e.target.closest("[data-day]");
+        if (!r) return;
+        viewDate = r.getAttribute("data-day");
+        $("dayPicker").value = viewDate;
+        editingEntryId = null;
+        showTab("today");
+        renderToday();
+      });
+    });
     $("btnQuickAdd").addEventListener("click", submitQuickAdd);
     $("btnImportRecipe").addEventListener("click", importRecipe);
     $("btnSaveSettings").addEventListener("click", saveSettings);
@@ -524,6 +815,20 @@
       else if (b.dataset.delfood) S.del("foods", b.dataset.delfood).then(renderFoods);
       else if (b.dataset.log) logFood(b.dataset.log);
       else if (b.dataset.sheetlog) { closeSheet(); logFood(b.dataset.sheetlog); }
+      else if (b.dataset.edit) startEditEntry(Number(b.dataset.edit));
+      else if (b.dataset.saveedit) saveEditEntry(Number(b.dataset.saveedit));
+      else if (b.dataset.canceledit) { editingEntryId = null; renderToday(); }
+      else if (b.dataset.again) logAgain(Number(b.dataset.again));
+      else if (b.dataset.recent !== undefined) {
+        var f = recentItems[Number(b.dataset.recent)];
+        if (f) {
+          addRawEntry(f.name, f.macros, {
+            brand: f.brand, code: f.code, nova: f.nova, flags: f.flags,
+            meal: currentMeal || nowMeal()
+          });
+          closeSheet();
+        }
+      }
     });
 
     window.addEventListener("online", refreshOnlineBanner);
