@@ -79,10 +79,10 @@ function ok(n, c, x) { if (c) { pass++; console.log("  [OK]   " + n); } else { f
   await page.fill("#searchQuery", "greek yogurt");
   await page.click("#btnSearch");
   await page.waitForTimeout(400);
-  ok("search returns the mocked hit", await page.locator("#searchResults .item").count() === 1);
+  ok("local-first search returns a seeded greek yogurt", await page.locator("#searchResults .item").count() >= 1);
   await page.click('#searchResults .item');
   await page.waitForTimeout(300);
-  ok("tapping a hit renders the product card", /Test Greek Yogurt/.test(await page.locator("#productCard").textContent()));
+  ok("tapping a hit renders the product card", /Greek Yogurt/i.test(await page.locator("#productCard").textContent()));
   ok("product card has a meal select", await page.locator("#portionMeal").count() === 1);
   await page.selectOption("#portionMeal", "lunch");
   await page.fill("#portion", "150");
@@ -99,9 +99,9 @@ function ok(n, c, x) { if (c) { pass++; console.log("  [OK]   " + n); } else { f
   await page.click("#btnSearch");
   await page.waitForTimeout(500);
   const st = await page.locator("#searchStatus").textContent();
-  ok("offline search says device-only", /device/i.test(st), st);
-  ok("offline search finds the cached product", await page.locator("#searchResults .item").count() >= 1);
-  ok("hit labeled as saved/scanned", await page.locator("#searchResults .srcnote").count() >= 1);
+  ok("offline search reads from the on-device database", /device/i.test(st), st);
+  ok("offline local search finds a seeded product", await page.locator("#searchResults .item").count() >= 1);
+  ok("online button hidden while offline", await page.locator("#btnSearchOnline").isHidden());
   await page.context().setOffline(false);
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
 

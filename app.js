@@ -59,6 +59,92 @@
     }
   };
 
+  // ------------------------------------------------- bundled seed database
+  var seedInfo = null;          // {version, count} once known
+  var searchIndex = null;       // lazily built in-memory name index
+
+  /** NDJSON text (one OFF-`product` per line) -> normalized products. */
+  function parseSeedNdjson(text) {
+    var out = [];
+    text.split("\n").forEach(function (line) {
+      line = line.trim();
+      if (!line) return;
+      try {
+        var raw = JSON.parse(line);
+        var p = L.normalizeProduct({ status: 1, code: raw.code, product: raw });
+        if (p && p.code) out.push(p);
+      } catch (e) { /* skip a malformed line, keep the rest */ }
+    });
+    return out;
+  }
+
+  /** Fetch + gunzip the seed file into normalized products. */
+  function fetchSeed(file) {
+    return fetch("seed/" + file).then(function (resp) {
+      if (!resp.ok) throw new Error("seed HTTP " + resp.status);
+      if (typeof DecompressionStream !== "undefined" && resp.body) {
+        var s = resp.body.pipeThrough(new DecompressionStream("gzip"));
+        return new Response(s).text().then(parseSeedNdjson);
+      }
+      // Old browser without DecompressionStream: skip the seed rather than
+      // feed gzipped bytes to JSON.parse. Live search still works.
+      return [];
+    });
+  }
+
+  /**
+   * Import the bundled food database on first launch (and whenever its version
+   * changes). Best-effort: any failure just leaves the app running on live
+   * Open Food Facts. Won't re-import a version already loaded.
+   */
+  function ensureSeed() {
+    return fetch("seed/seed-meta.json")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .catch(function () { return null; })
+      .then(function (meta) {
+        if (!meta) return;
+        return S.getSetting("seedVersion", null).then(function (cur) {
+          seedInfo = { version: meta.version, count: meta.count, loaded: cur === meta.version };
+          if (cur === meta.version) return;   // already have this version
+          status($("searchStatus"), "Loading food database…");
+          return fetchSeed(meta.file).then(function (products) {
+            if (!products.length) return;
+            return S.importProducts(products).then(function () {
+              return S.setSetting("seedVersion", meta.version);
+            }).then(function () {
+              seedInfo.loaded = true;
+              searchIndex = null;             // include the new rows
+              status($("searchStatus"), "");
+              refreshSeedLine();
+            });
+          });
+        });
+      })
+      .catch(function () { /* seed is optional */ });
+  }
+
+  function buildSearchIndex() {
+    return S.getAllCachedProducts().then(function (list) {
+      searchIndex = list.map(function (p) {
+        return { p: p, hay: ((p.name || "") + " " + (p.brand || "")).toLowerCase() };
+      });
+      return searchIndex;
+    });
+  }
+
+  /** Instant substring search over the on-device corpus (seed + your scans). */
+  function localSearchProducts(q) {
+    q = String(q || "").trim().toLowerCase();
+    var idxP = searchIndex ? Promise.resolve(searchIndex) : buildSearchIndex();
+    return idxP.then(function (idx) {
+      var out = [];
+      for (var i = 0; i < idx.length && out.length < 50; i++) {
+        if (idx[i].hay.indexOf(q) !== -1) out.push(idx[i].p);
+      }
+      return out;
+    });
+  }
+
   function today() {
     var d = new Date();
     return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") +
@@ -281,6 +367,17 @@
   }
 
   // -------------------------------------------------------------- barcode
+  /** Cache/seed hit for any barcode variant, or null. Never touches network. */
+  function localBarcode(code) {
+    var variants = L.barcodeVariants(code);
+    return (function tryNext(i) {
+      if (i >= variants.length) return Promise.resolve(null);
+      return S.getCachedProduct(variants[i]).then(function (p) {
+        return p || tryNext(i + 1);
+      }, function () { return tryNext(i + 1); });
+    })(0);
+  }
+
   function lookup(code) {
     code = String(code || "").trim();
     if (!/^\d{6,14}$/.test(code)) {
@@ -290,22 +387,33 @@
     lastCode = code;
     $("productCard").innerHTML = "";
     $("btnLookup").disabled = true;
-    status($("scanStatus"), navigator.onLine === false
-      ? "Offline - checking saved products…"
-      : "Looking up " + code + "…");
 
-    L.lookupProduct(lookupDeps, code).then(function (r) {
-      $("btnLookup").disabled = false;
-
-      if (r.product) {
-        // Usable result, possibly from the on-device cache.
-        status($("scanStatus"), r.stale ? r.message : "", r.stale ? "warn" : "");
-        renderProduct(r.product, r.stale);
+    // Local-first: a bundled/seen product resolves instantly with no network
+    // call, which is the whole point of the on-device database. Only reach out
+    // to Open Food Facts when we don't already have it.
+    localBarcode(code).then(function (localP) {
+      if (localP) {
+        $("btnLookup").disabled = false;
+        status($("scanStatus"), "", "");
+        renderProduct(localP, false);
         return;
       }
-      // No product: explain precisely why, and offer the manual path.
-      status($("scanStatus"), r.message, "err");
-      renderFallback(code, r.error);
+      status($("scanStatus"), navigator.onLine === false
+        ? "Offline - checking saved products…"
+        : "Looking up " + code + "…");
+      return L.lookupProduct(lookupDeps, code).then(function (r) {
+        $("btnLookup").disabled = false;
+        if (r.product) {
+          status($("scanStatus"), r.stale ? r.message : "", r.stale ? "warn" : "");
+          renderProduct(r.product, r.stale);
+          return;
+        }
+        // No product. If this was a connectivity failure (not a genuine
+        // "unknown to OFF"), remember the barcode so we can fill it in later.
+        if (r.error !== L.ERR.NOT_FOUND) S.addPending(code);
+        status($("scanStatus"), r.message, "err");
+        renderFallback(code, r.error);
+      });
     });
   }
 
@@ -369,42 +477,73 @@
   }
 
   // ---------------------------------------------------------------- search
+  function renderSearchResults(products) {
+    lastSearchResults = products;
+    $("searchResults").innerHTML = products.map(function (p, i) {
+      var nc = L.netCarbs(p.per100.carb, p.per100.fiber);
+      var note = p._online ? "Open Food Facts" : "";
+      return '<div class="item" data-result="' + i + '" role="button" tabindex="0">' +
+        '<div class="top"><span class="nm">' + esc(p.name) + "</span>" +
+          (note ? '<span class="srcnote">' + note + "</span>" : "") + "</div>" +
+        (p.brand ? '<div class="sub">' + esc(p.brand) + "</div>" : "") +
+        '<div class="macros">per 100 g: net carbs <b>' + fmt(nc, 1) + " g</b>" +
+          (p.per100.kcal ? " &middot; <b>" + fmt(p.per100.kcal, 0) + "</b> kcal" : "") + "</div>" +
+        '<div class="badges">' + novaBadge(p.nova) + flagBadges(p.flags) + "</div>" +
+      "</div>";
+    }).join("");
+  }
+
+  /** Local-first: search the on-device database instantly, no API call. */
   function doSearch() {
     var q = $("searchQuery").value.trim();
     if (q.length < 2) { status($("searchStatus"), "Type at least two characters.", "err"); return; }
-    $("btnSearch").disabled = true;
-    $("searchResults").innerHTML = "";
-    status($("searchStatus"), navigator.onLine === false
-      ? "Offline - searching foods saved on this device…"
-      : "Searching…");
+    status($("searchStatus"), "Searching your food database…");
+    localSearchProducts(q).then(function (local) {
+      renderSearchResults(local);
+      var n = local.length;
+      status($("searchStatus"),
+        n ? (n + (n >= 50 ? "+" : "") + " match" + (n === 1 ? "" : "es") + " on this device."
+           + (navigator.onLine !== false ? " Not it? Search Open Food Facts below." : ""))
+          : (navigator.onLine !== false
+              ? "Nothing on this device matched. Try Open Food Facts below."
+              : "Nothing on this device matched, and you're offline."), "");
+      // The online search is the ONLY thing that hits the rate-limited API, and
+      // only when the user asks for it -- so normal use never touches it.
+      $("btnSearchOnline").classList.toggle("hidden", navigator.onLine === false);
+      $("btnSearchOnline").textContent = n ? "Also search Open Food Facts" : "Search Open Food Facts online";
+    });
+  }
+
+  function doOnlineSearch() {
+    var q = $("searchQuery").value.trim();
+    if (q.length < 2) return;
+    $("btnSearchOnline").disabled = true;
+    status($("searchStatus"), "Searching Open Food Facts…");
     L.searchProducts(searchDeps, q).then(function (r) {
-      $("btnSearch").disabled = false;
-      lastSearchResults = r.products;
-      status($("searchStatus"), r.message || "", r.error ? "warn" : "");
-      $("searchResults").innerHTML = r.products.map(function (p, i) {
-        var nc = L.netCarbs(p.per100.carb, p.per100.fiber);
-        var srcNote = p._localKind === "food" ? "saved food"
-                    : p._localKind === "cached" ? "scanned before" : "";
-        return '<div class="item" data-result="' + i + '" role="button" tabindex="0">' +
-          '<div class="top"><span class="nm">' + esc(p.name) + "</span>" +
-            (srcNote ? '<span class="srcnote">' + srcNote + "</span>" : "") + "</div>" +
-          (p.brand ? '<div class="sub">' + esc(p.brand) + "</div>" : "") +
-          '<div class="macros">per 100 g: net carbs <b>' + fmt(nc, 1) + " g</b>" +
-            (p.per100.kcal ? " &middot; <b>" + fmt(p.per100.kcal, 0) + "</b> kcal" : "") + "</div>" +
-          '<div class="badges">' + novaBadge(p.nova) + flagBadges(p.flags) + "</div>" +
-        "</div>";
-      }).join("");
+      $("btnSearchOnline").disabled = false;
+      var byCode = {};
+      lastSearchResults.forEach(function (p) { if (p.code) byCode[p.code] = true; });
+      var merged = lastSearchResults.slice();
+      (r.products || []).forEach(function (p) {
+        if (p.code && byCode[p.code]) return;
+        if (p.code) byCode[p.code] = true;
+        p._online = true;
+        merged.push(p);
+      });
+      renderSearchResults(merged);
+      var added = merged.length - lastSearchResults.length;
+      status($("searchStatus"),
+        r.message || (added + " more from Open Food Facts."), r.error ? "warn" : "");
     });
   }
 
   function pickSearchResult(i) {
     var p = lastSearchResults[i];
     if (!p) return;
-    // Mirror a fresh network hit into the product cache, exactly like a
-    // successful scan, so it resolves offline (and in offline search) later.
-    if (!p._localKind && p.code) S.putCachedProduct(p.code, p);
-    // A previously-scanned product is a saved copy; a live hit is fresh.
-    renderProduct(p, p._localKind === "cached");
+    // Cache a live Open Food Facts hit so it resolves instantly (and offline)
+    // next time. Local/seed hits are already in the cache.
+    if (p._online && p.code) S.putCachedProduct(p.code, p);
+    renderProduct(p, false);
     $("productCard").scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -591,6 +730,67 @@
     });
   }
 
+  // ------------------------------------------------ pending enrichment queue
+  var RECONCILE_GAP_MS = 400;   // gentle spacing under the 15/min product limit
+  var RECONCILE_MAX = 15;       // process at most this many per run
+  var reconciling = false;
+
+  /**
+   * Fill in barcodes that were scanned while offline/unreachable, once we're
+   * back online. On a real network hit lookupProduct() also refreshes the
+   * cache, so we just drop the code from the queue. A genuine "unknown to OFF"
+   * is dropped too (retrying won't help). Never touches the user's own foods
+   * or logged entries.
+   */
+  function reconcilePending() {
+    if (reconciling || navigator.onLine === false) return Promise.resolve(0);
+    reconciling = true;
+    return S.getAllPending().then(function (list) {
+      list = (list || []).slice(0, RECONCILE_MAX);
+      var filled = 0, i = 0;
+      function step() {
+        if (i >= list.length) return Promise.resolve();
+        if (navigator.onLine === false) return Promise.resolve();
+        var row = list[i++];
+        return L.lookupProduct(lookupDeps, row.code).then(function (r) {
+          if (r.product && r.source === "network") {
+            filled++;
+            searchIndex = null;                 // new product joins search
+            return S.removePending(row.code);
+          }
+          if (r.error === L.ERR.NOT_FOUND) return S.removePending(row.code);
+          return S.bumpPending(row.code);       // still unreachable; try later
+        }).then(function () {
+          return new Promise(function (res) { setTimeout(res, RECONCILE_GAP_MS); });
+        }).then(step);
+      }
+      return step().then(function () { return filled; });
+    }).then(function (filled) {
+      reconciling = false;
+      if (filled) {
+        status($("scanStatus"),
+          filled + " scanned item" + (filled === 1 ? "" : "s") + " filled in from Open Food Facts.", "ok");
+      }
+      updateDbLine();
+      return filled;
+    }, function () { reconciling = false; return 0; });
+  }
+
+  // ------------------------------------------------ offline-database status
+  function updateDbLine() {
+    var el = $("dbLine");
+    if (!el) return;
+    Promise.all([S.countProducts(), S.getAllPending()]).then(function (r) {
+      var count = r[0], pending = (r[1] || []).length;
+      var ver = seedInfo ? seedInfo.version : "";
+      var parts = [];
+      parts.push(count.toLocaleString() + " products on this device" + (ver ? " (seed " + esc(ver) + ")" : ""));
+      if (pending) parts.push(pending + " scan" + (pending === 1 ? "" : "s") + " waiting to be filled in when online");
+      el.innerHTML = parts.join(". ") + ".";
+    });
+  }
+  function refreshSeedLine() { updateDbLine(); }
+
   // -------------------------------------------------------------- settings
   function loadSettings() {
     return S.getSetting("carbTarget", null).then(function (v) {
@@ -775,6 +975,7 @@
     });
 
     $("btnSearch").addEventListener("click", doSearch);
+    $("btnSearchOnline").addEventListener("click", doOnlineSearch);
     $("searchQuery").addEventListener("keydown", function (e) { if (e.key === "Enter") doSearch(); });
     $("searchResults").addEventListener("click", function (e) {
       var it = e.target.closest && e.target.closest("[data-result]");
@@ -831,12 +1032,21 @@
       }
     });
 
-    window.addEventListener("online", refreshOnlineBanner);
+    window.addEventListener("online", function () {
+      refreshOnlineBanner();
+      reconcilePending();          // fill in anything scanned while offline
+    });
     window.addEventListener("offline", refreshOnlineBanner);
     refreshOnlineBanner();
 
     S.requestPersistence();
     loadSettings().then(renderToday).then(renderFoods);
+
+    // Load the bundled food database, then reconcile any pending scans and
+    // show the on-device database status. All best-effort and non-blocking.
+    ensureSeed()
+      .then(function () { updateDbLine(); return reconcilePending(); })
+      .catch(function () {});
 
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("sw.js").catch(function () {});

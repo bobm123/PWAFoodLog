@@ -34,10 +34,19 @@ each hit `high` or `moderate` severity with a short explanation.
 - **Barcode scanning** with the phone camera, plus manual barcode entry as a fallback.
   12-digit UPC-A codes are automatically retried as 13-digit EAN-13.
 - **Search by name** on the Find tab — log "greek yogurt" without a barcode.
-  Online it queries Open Food Facts; offline (or when the network fails) it
-  falls back to searching your saved foods and previously scanned products,
-  and says so. A search hit you open is cached like a scan, so it resolves
-  offline afterwards.
+  Search is **local-first**: it queries a bundled on-device food database
+  instantly and offline, and Open Food Facts is only contacted when you tap
+  *"Search Open Food Facts"* — so normal use never touches the rate-limited
+  search API. A live hit you open is cached like a scan for next time.
+- **Bundled offline food database**: a subset of the most-scanned foods ships
+  with the app and loads into IndexedDB on first launch, so search and barcode
+  lookups for common items are instant and work with no signal. See
+  [Offline food database](#offline-food-database-the-bundled-seed) for how it's
+  built and refreshed.
+- **Scan now, fill in later**: a barcode scanned while offline or unreachable is
+  recorded to a pending queue; the moment you're back online the app quietly
+  resolves it from Open Food Facts and caches it — without overwriting anything
+  you entered by hand.
 - **NOVA 1–4 processing badge** and **high-GI ingredient flags** on every product.
 - **Meals**: every entry belongs to breakfast, lunch, dinner or a snack
   (defaulted from the time of day), and the diary groups entries by meal with
@@ -73,12 +82,12 @@ network at all:
 | Daily totals, calorie split, net-carb budget | Yes |
 | Custom foods and imported recipes | Yes |
 | Export / import JSON | Yes |
-| Scan a barcode you've scanned before | Yes — served from the on-device product cache |
+| Scan a barcode in the bundled database or one you've scanned before | Yes — resolved on-device, no network call |
+| Search common foods by name | Yes — the bundled database is searched first |
 | Meal grouping, edit portion, log again, recents | Yes |
 | History charts and streak | Yes |
-| Search saved foods & previously scanned products by name | Yes — automatic fallback |
-| Scan a **new** barcode | Needs a connection |
-| Search Open Food Facts by name | Needs a connection (falls back to on-device matches) |
+| Scan a barcode not in the database | Needs a connection (queued for later if offline) |
+| Search Open Food Facts for items beyond the bundled set | Needs a connection (on explicit tap) |
 
 Lookups are bounded by an **8-second timeout** (`LOOKUP_TIMEOUT_MS` in `app.js`)
 via `AbortController`, because `fetch()` has no timeout of its own and will
@@ -96,6 +105,81 @@ actionable message rather than a spinner:
 A banner appears whenever the browser reports it is offline. When you enter a food
 by hand you can attach the barcode that failed; it is then cached locally, so
 scanning that item again resolves instantly, even with no signal.
+
+## Offline food database (the bundled seed)
+
+### Why
+
+Open Food Facts rate-limits **search to 10 requests/min/IP** (and it's a heavy
+endpoint), while barcode reads get 15/min. A phone browser can't hold the full
+9 GB export, but it doesn't need to: food popularity is extremely long-tailed, so
+a few tens of thousands of the most-scanned products cover the overwhelming
+majority of real scans. That subset ships with the app, loads into IndexedDB on
+first launch, and makes search and common barcodes **instant, offline, and free
+of the rate limit**. Live Open Food Facts is kept only as an on-demand fallback
+for the long tail.
+
+### How it works at runtime
+
+- On first launch (and whenever `seed/seed-meta.json`'s `version` changes) the app
+  fetches `seed/products-us.ndjson.gz`, gunzips it in the browser
+  (`DecompressionStream`), runs each line through the same `normalizeProduct()`
+  the live API uses, and bulk-imports into the `products` store. Existing rows are
+  never overwritten, so a fresher network/manual copy always wins. Re-imports are
+  guarded by the stored `seedVersion`, so a reload never re-loads the same seed.
+- **Search** (Find tab) is local-first: it scans an in-memory index of the
+  on-device corpus and returns instantly. Open Food Facts is queried **only** when
+  you tap *"Search Open Food Facts"*, so ordinary use never hits the search limit.
+- **Barcode** lookups check the on-device database (seed + your own scans) first
+  and only reach out when the item isn't already there.
+- **Scan now, fill in later**: a barcode that fails for *connectivity* reasons
+  (offline/timeout/unreachable — not a genuine "unknown to OFF") is added to a
+  `pending` store. When the browser fires `online`, a throttled reconciler
+  (spaced under the 15/min limit) resolves each pending code from Open Food Facts,
+  caches it, and drops it from the queue. A genuine not-found is dropped too
+  (retrying won't help). It updates only the product cache — never your logged
+  entries or hand-entered foods.
+
+Settings → *Offline food database* shows how many products are on the device, the
+seed version, and how many scans are still waiting to be filled in.
+
+### Building the full seed on your machine
+
+The repo ships a small, clearly-labeled **sample** seed (~30 common foods) so the
+feature works out of the box. Replace it with a real subset built from an Open
+Food Facts export. The sandbox can't reach the dataset, so this runs on your
+machine:
+
+```bash
+pip install duckdb
+
+# 1) Download an export from https://world.openfoodfacts.org/data
+#    The CSV export (tab-separated, .csv.gz) has the most stable schema.
+#    DuckDB reads the .gz directly — no need to unzip the 9 GB file.
+
+# 2) Build the seed (top 25k most-scanned US foods, ~a few MB gzipped):
+cd foodlog-pwa/tools
+python build_seed.py \
+    --input /path/to/en.openfoodfacts.org.products.csv.gz \
+    --output ../seed/products-us.ndjson.gz \
+    --limit 25000 --country united-states
+
+# 3) Commit the regenerated seed + its metadata, then push:
+git add ../seed/products-us.ndjson.gz ../seed/seed-meta.json
+git commit -m "Refresh offline food seed"
+```
+
+`build_seed.py` keeps rows that have a numeric barcode, a name, and some nutrition;
+ranks them by `unique_scans_n`; keeps the top N; projects only the ~dozen fields
+the app uses; and writes each product in Open Food Facts' `product` JSON shape so
+the app needs no special-casing. Run it with `--peek` to print the input's columns
+and a sample row, and see `--help` for all options (country, limit, Parquet/JSONL
+input). Because `seed-meta.json`'s `version` (the build date) changes, every device
+re-imports on its next launch.
+
+> Tens of MB is fine on GitHub Pages, but a large seed committed to git bloats the
+> repo over time; for anything beyond a few MB consider Git LFS for
+> `seed/*.ndjson.gz`.
 
 ## Removing the CDN dependency
 
@@ -176,21 +260,32 @@ foodlog-pwa/
 │                             - lookupProduct()     offline-tolerant lookup state machine
 │                             - recipeFromAnalyzerJson()  import from the recipe analyzer
 ├── store.js                IndexedDB persistence: log entries, custom foods,
-│                             settings, and the cached-product mirror. Plus
+│                             settings, the cached-product mirror (incl. the
+│                             bundled seed), and the pending-scan queue. Plus
 │                             JSON export/import.
 ├── app.js                  UI wiring: tabs, camera scanning, rendering, the
-│                             8-second lookup timeout, offline banner, and the
-│                             manual-entry fallback path.
+│                             8-second lookup timeout, offline banner, local-first
+│                             search, seed import, and the pending reconciler.
+│
+├── seed/                   The bundled offline food database.
+│   ├── products-us.ndjson.gz   gzipped NDJSON, one OFF `product` per line.
+│   └── seed-meta.json          {version, count, ...}; version drives re-import.
+├── tools/
+│   └── build_seed.py       DuckDB script to regenerate seed/ from an OFF export.
 │
 ├── test_lib.js             Node tests: parsing, macros, GI watchlist, recipe import.
 ├── test_offline.js         Node tests: every lookup failure mode (timeout, offline,
 │                             cache fallback, unknown barcode).
 ├── test_features.js        Node tests: meals, portion rescaling, recents, history
 │                             totals and streak, and every name-search failure mode.
+├── test_seed.js            Node tests: the bundled seed file is valid and every line
+│                             normalizes + computes GI flags; local search over it.
 ├── smoke.js                Headless-browser end-to-end test (dev only; needs
 │                             `npm i playwright`). Drives the real UI: add sheet,
-│                             meal groups, edit/log-again, search online + offline,
-│                             History charts.
+│                             meal groups, edit/log-again, search, History charts.
+├── smoke_seed.js           Headless test: first-run seed import, local-first search,
+│                             local-first barcode (zero network), pending queue +
+│                             online reconcile, version-guarded re-import.
 │
 ├── serve.py                Local dev server on localhost (a secure context, so the
 │                             camera and service worker both work).
@@ -218,7 +313,9 @@ Run the tests with:
 node test_lib.js        # 45 assertions: parsing, macros, GI watchlist, recipe import
 node test_offline.js    # 29 assertions: timeout, offline, cache fallback, not-found
 node test_features.js   # 69 assertions: meals, rescaling, recents, history, search
+node test_seed.js       # 16 assertions: the bundled seed validates + normalizes
 node smoke.js           # optional end-to-end run in headless Chromium (npm i playwright)
+node smoke_seed.js      # optional end-to-end: seed import, local search, pending queue
 ```
 
 ## Adding to the watchlist

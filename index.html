@@ -76,9 +76,10 @@
         <input id="searchQuery" placeholder="e.g. greek yogurt" aria-label="Search foods by name">
         <button id="btnSearch" class="primary">Search</button>
       </div>
-      <p class="hint">Searches Open Food Facts. Offline it searches your saved foods and previously scanned products instead.</p>
+      <p class="hint">Searches the food database on your device first &mdash; instant and offline. Open Food Facts is only queried when you tap the button below.</p>
       <p class="status" id="searchStatus"></p>
       <div id="searchResults" class="list"></div>
+      <button id="btnSearchOnline" class="ghost hidden" style="margin-top:.6rem">Search Open Food Facts online</button>
     </div>
 
     <div id="productCard"></div>
@@ -157,6 +158,12 @@
       <p class="hint">Leave blank to just track totals with no target. Set it to see a progress bar and an over-budget warning.</p>
       <button id="btnSaveSettings" class="primary">Save</button>
       <p class="status" id="settingsStatus"></p>
+    </div>
+
+    <div class="card">
+      <h2>Offline food database</h2>
+      <p class="hint" id="dbLine">Checking…</p>
+      <p class="hint">A bundled set of popular foods is stored on your device so search and barcodes work instantly and offline. Anything not in it is fetched from Open Food Facts on demand and cached for next time. Barcodes scanned while offline are filled in automatically once you're back online.</p>
     </div>
 
     <div class="card">

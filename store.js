@@ -12,7 +12,7 @@
   "use strict";
 
   var DB_NAME = "foodlog";
-  var DB_VERSION = 2;
+  var DB_VERSION = 3;
   var _db = null;
 
   function open() {
@@ -32,9 +32,15 @@
           db.createObjectStore("settings", { keyPath: "key" });
         }
         // v2: cache of normalized Open Food Facts products, keyed by the
-        // barcode that was queried, so scans resolve with no connection.
+        // barcode that was queried, so scans resolve with no connection. This
+        // is also where the bundled seed database is imported.
         if (!db.objectStoreNames.contains("products")) {
           db.createObjectStore("products", { keyPath: "code" });
+        }
+        // v3: barcodes scanned while offline/unreachable that still need to be
+        // filled in from Open Food Facts once a connection is available.
+        if (!db.objectStoreNames.contains("pending")) {
+          db.createObjectStore("pending", { keyPath: "code" });
         }
       };
       req.onsuccess = function () { _db = req.result; resolve(_db); };
@@ -129,6 +135,68 @@
     }, function () { return []; });
   }
 
+  function countProducts() {
+    return tx("products", "readonly", function (s) { return s.count(); })
+      .then(function (n) { return n || 0; }, function () { return 0; });
+  }
+
+  /**
+   * Bulk-import an array of normalized products into the cache in one
+   * transaction (the bundled seed database). Marks each row seed:true so it is
+   * never mistaken for something the user personally scanned. Existing rows for
+   * a code are NOT overwritten, so a fresher network/manual copy always wins.
+   */
+  function importProducts(products) {
+    if (!products || !products.length) return Promise.resolve(0);
+    return open().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var t = db.transaction("products", "readwrite");
+        var s = t.objectStore("products");
+        var added = 0, i = 0;
+        function step() {
+          if (i >= products.length) return;
+          var p = products[i++];
+          var getReq = s.get(String(p.code));
+          getReq.onsuccess = function () {
+            if (!getReq.result) {              // don't clobber a real copy
+              s.put({ code: String(p.code), product: p, seed: true,
+                      cachedAt: new Date().toISOString() });
+              added++;
+            }
+            step();
+          };
+          getReq.onerror = function () { step(); };
+        }
+        step();
+        t.oncomplete = function () { resolve(added); };
+        t.onerror = function () { reject(t.error); };
+        t.onabort = function () { reject(t.error); };
+      });
+    });
+  }
+
+  // -------------------------------------------------- pending enrichment queue
+  /** Remember a barcode that couldn't be resolved yet (offline/unreachable). */
+  function addPending(code, name) {
+    return tx("pending", "readonly", function (s) { return s.get(String(code)); })
+      .then(function (existing) {
+        var row = existing || { code: String(code), addedAt: new Date().toISOString(), tries: 0 };
+        if (name && !row.name) row.name = name;
+        return put("pending", row);
+      });
+  }
+  function getAllPending() { return getAll("pending"); }
+  function removePending(code) { return del("pending", String(code)); }
+  function bumpPending(code) {
+    return tx("pending", "readonly", function (s) { return s.get(String(code)); })
+      .then(function (row) {
+        if (!row) return;
+        row.tries = (row.tries || 0) + 1;
+        row.lastTry = new Date().toISOString();
+        return put("pending", row);
+      });
+  }
+
   /** Ask the browser not to evict us. Best-effort. */
   function requestPersistence() {
     if (navigator.storage && navigator.storage.persist) {
@@ -187,6 +255,9 @@
     entriesForDate: entriesForDate, entriesForRange: entriesForRange,
     getCachedProduct: getCachedProduct, putCachedProduct: putCachedProduct,
     getAllCachedProducts: getAllCachedProducts,
+    countProducts: countProducts, importProducts: importProducts,
+    addPending: addPending, getAllPending: getAllPending,
+    removePending: removePending, bumpPending: bumpPending,
     getSetting: getSetting, setSetting: setSetting,
     requestPersistence: requestPersistence,
     exportAll: exportAll, importAll: importAll

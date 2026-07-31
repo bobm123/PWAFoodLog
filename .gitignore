@@ -12,3 +12,12 @@ package-lock.json
 
 # Local exports from the app
 foodlog-*.json
+
+# Open Food Facts bulk export — build input for tools/build_seed.py.
+# Multi-GB; never commit (GitHub rejects files over 100 MB). The built
+# seed under seed/*.ndjson.gz IS committed; only the raw dump is ignored.
+off.csv.gz
+*.openfoodfacts.org.products.csv
+*.csv.gz
+*.jsonl.gz
+*.parquet
