@@ -5,6 +5,15 @@ log food by barcode, track macros with a net-carb focus, and **flag ultra-proces
 and high-glycemic ingredients** — with no subscription, no ads, and no upsell,
 because the data source is free and the app has no backend.
 
+## Install on your iPhone
+
+**➡️ [https://bobm123.github.io/PWAFoodLog/](https://bobm123.github.io/PWAFoodLog/)**
+
+Open that link in **Safari** on your iPhone, then tap **Share → Add to Home
+Screen**. Launched from the home screen it runs full-screen, works offline, and
+IndexedDB gets much stronger persistence. (The link is live once GitHub Pages is
+enabled for the repo — see [Deploying](#deploying-required-for-camera-scanning).)
+
 ## Why this exists
 
 The free-tier landscape is split in two:
@@ -202,16 +211,15 @@ static host works. GitHub Pages:
 
 ```bash
 cd foodlog-pwa
-git init && git add . && git commit -m "Food Log PWA"
-git branch -M main
-git remote add origin git@github.com:<you>/foodlog.git
-git push -u origin main
-# GitHub -> Settings -> Pages -> Source: main branch, / (root)
+git push                                   # push to github.com/bobm123/PWAFoodLog
+# GitHub -> Settings -> Pages -> Source: Deploy from a branch, main, / (root)
 ```
 
-Then open `https://<you>.github.io/foodlog/` on your iPhone, tap **Share →
-Add to Home Screen**. Launched from the home screen it runs full-screen and
-IndexedDB gets much better persistence guarantees.
+Then open **[https://bobm123.github.io/PWAFoodLog/](https://bobm123.github.io/PWAFoodLog/)**
+on your iPhone in Safari, tap **Share → Add to Home Screen**. Launched from the
+home screen it runs full-screen and IndexedDB gets much better persistence
+guarantees. (New here? First-time repo setup — `git init`, `git remote add
+origin …`, `git branch -M main` — is only needed once; this repo already has it.)
 
 Netlify or Cloudflare Pages work identically — drag the folder in.
 
