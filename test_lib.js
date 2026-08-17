@@ -116,5 +116,27 @@ const v8 = L.barcodeVariants("20161512");
 ok("EAN-8 left alone", v8.length === 1, v8.join("|"));
 ok("nutella EAN-13 untouched", L.barcodeVariants("3017620422003").length === 1);
 
+console.log("\n-- foodFromProduct: save a scanned product for re-logging --");
+const prod = L.normalizeProduct(nutella);
+const pf = L.foodFromProduct(prod);
+ok("id keyed by barcode (idempotent re-save)", pf.id === "product:3017620422003", pf.id);
+ok("type is product", pf.type === "product");
+ok("name + brand carried", pf.name === "Nutella" && pf.brand === "Ferrero");
+ok("code carried", pf.code === "3017620422003");
+ok("serving grams from product (15 g)", close(pf.servingGrams, 15));
+ok("per100 preserved so logging matches the card", close(pf.per100.carb, 57.5) && close(pf.per100.fiber, 3.675));
+ok("nova + flags carried", pf.nova === 4 && Array.isArray(pf.flags));
+ok("logging a serving round-trips macros", close(L.macrosForGrams(pf.per100, pf.servingGrams).fat, 4.635, 0.01));
+const pf2 = L.foodFromProduct({ name: "No Barcode Item", per100: { carb: 10 } });
+ok("no-barcode falls back to a name slug", pf2.id === "product:no-barcode-item", pf2.id);
+ok("missing serving defaults to 100 g", pf2.servingGrams === 100);
+
+console.log("\n-- pendingProductFood: offline barcode capture --");
+const pp = L.pendingProductFood("1234567890");
+ok("pending flag set", pp.pending === true);
+ok("keyed by barcode (same id as the resolved product)", pp.id === "product:1234567890");
+ok("code carried, zero macros until filled", pp.code === "1234567890" && pp.per100.carb === 0);
+ok("has a placeholder name", /1234567890/.test(pp.name));
+
 console.log("\n" + (fail ? "FAILED " + fail : "ALL PASSED") + "  (" + pass + " assertions)\n");
 process.exit(fail ? 1 : 0);

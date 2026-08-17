@@ -368,16 +368,34 @@
       '<div class="row" style="margin-top:.7rem">' +
         '<input id="portion" type="number" step="any" value="' + serving + '" aria-label="Portion in grams">' +
         '<select id="portionMeal" aria-label="Meal">' + mealOptions(currentMeal || nowMeal()) + "</select>" +
-        '<button id="btnAddEntry" class="primary">Add to ' +
-          (viewDate === today() ? "today" : esc(viewDate)) + "</button>" +
       "</div>" +
-      '<p class="hint">Portion in grams' + (p.servingSize ? " (label serving: " + esc(p.servingSize) + ")" : "") + "</p>" +
+      '<div class="row" style="margin-top:.5rem">' +
+        '<button id="btnAddEntry" class="primary" style="flex:1">Add to ' +
+          (viewDate === today() ? "today" : esc(viewDate)) + "</button>" +
+        '<button id="btnSaveProduct" class="ghost" style="flex:1">Save product</button>' +
+      "</div>" +
+      '<p class="hint">Portion in grams' + (p.servingSize ? " (label serving: " + esc(p.servingSize) + ")" : "") +
+        ". Save product keeps it in your Foods for quick re-logging.</p>" +
       "</div>";
 
     $("btnAddEntry").addEventListener("click", function () {
       var g = parseFloat($("portion").value);
       if (!(g > 0)) return;
       addEntry(p, g, $("portionMeal").value);
+    });
+    $("btnSaveProduct").addEventListener("click", function () { saveProduct(p); });
+  }
+
+  /** Save a scanned/looked-up product to the frequently-purchased list. */
+  function saveProduct(p) {
+    if (!p) return;
+    return S.getAll("foods").then(function (foods) {
+      var food = L.foodFromProduct(p);
+      var existed = foods.some(function (f) { return f.id === food.id; });
+      return S.put("foods", food).then(function () {
+        status($("scanStatus"), (existed ? "Updated " : "Saved ") + p.name + " in your Foods.", "ok");
+        renderFoods();
+      });
     });
   }
 
@@ -465,24 +483,47 @@
 
   /** When a lookup can't produce a product, keep the user moving. */
   function renderFallback(code, err) {
-    var retryable = err !== L.ERR.NOT_FOUND;
+    var retryable = err !== L.ERR.NOT_FOUND;   // offline/timeout/network vs unknown
     $("productCard").innerHTML =
       '<div class="card">' +
         "<h2>Couldn't load " + esc(code) + "</h2>" +
         '<p class="hint">' + esc(L.ERR_MESSAGE[err] || "Lookup failed.") + "</p>" +
         '<div class="row">' +
+          (retryable ? '<button id="btnSaveLater" class="primary">Save for later</button>' : "") +
           (retryable ? '<button id="btnRetry" class="ghost">Retry</button>' : "") +
-          '<button id="btnManual" class="primary">Enter it by hand</button>' +
+          '<button id="btnManual" class="' + (retryable ? "ghost" : "primary") + '">Enter it by hand</button>' +
         "</div>" +
-        '<p class="hint">Logging, custom foods and totals all keep working offline.</p>' +
+        (retryable
+          ? '<p class="hint">At the store with bad signal? <b>Save for later</b> keeps the barcode; its nutrition fills in automatically once you\'re back online.</p>'
+          : '<p class="hint">Logging, custom foods and totals all keep working offline.</p>') +
       "</div>";
 
-    if (retryable) $("btnRetry").addEventListener("click", function () { lookup(code); });
+    if (retryable) {
+      $("btnSaveLater").addEventListener("click", function () { saveBarcodeForLater(code); });
+      $("btnRetry").addEventListener("click", function () { lookup(code); });
+    }
     $("btnManual").addEventListener("click", function () {
       showTab("foods");
       $("cfName").value = "";
       $("cfBarcode").value = code;      // carry the barcode across
       $("cfName").focus();
+    });
+  }
+
+  /**
+   * Offline capture: save a placeholder product for this barcode and queue it
+   * for enrichment. The reconciler fills in real nutrition once online.
+   */
+  function saveBarcodeForLater(code) {
+    return Promise.all([
+      S.put("foods", L.pendingProductFood(code)),
+      S.addPending(code)
+    ]).then(function () {
+      status($("scanStatus"),
+        "Saved barcode " + code + " to your Foods. Nutrition will fill in when you're back online.", "ok");
+      $("productCard").innerHTML = "";
+      renderFoods();
+      updateDbLine();
     });
   }
 
@@ -699,14 +740,17 @@
       $("foodList").innerHTML = foods.map(function (f) {
         var m = L.macrosForGrams(f.per100, f.servingGrams);
         return '<div class="item">' +
-          '<div class="top"><span class="nm">' + esc(f.name) + "</span>" +
+          '<div class="top"><span class="nm">' + esc(f.name) +
+            (f.pending ? ' <span class="srcnote">awaiting nutrition</span>' : "") + "</span>" +
             '<span class="sub">' + esc(f.servingLabel || fmt(f.servingGrams, 0) + " g") + "</span></div>" +
-          '<div class="macros">per serving: net carbs <b>' + fmt(m.netCarb, 1) +
-            " g</b> &middot; fat <b>" + fmt(m.fat, 1) + " g</b> &middot; protein <b>" +
-            fmt(m.protein, 1) + " g</b></div>" +
+          (f.pending
+            ? '<div class="macros">Barcode ' + esc(f.code) + " saved. Nutrition fills in when you're back online.</div>"
+            : '<div class="macros">per serving: net carbs <b>' + fmt(m.netCarb, 1) +
+              " g</b> &middot; fat <b>" + fmt(m.fat, 1) + " g</b> &middot; protein <b>" +
+              fmt(m.protein, 1) + " g</b></div>") +
           '<div class="badges">' + novaBadge(f.nova) + flagBadges(f.flags) + "</div>" +
           '<div class="acts">' +
-            '<button class="primary tiny" data-log="' + esc(f.id) + '">Log a serving</button>' +
+            (f.pending ? "" : '<button class="primary tiny" data-log="' + esc(f.id) + '">Log a serving</button>') +
             '<button class="ghost tiny" data-delfood="' + esc(f.id) + '">Delete</button>' +
           "</div>" +
         "</div>";
@@ -802,7 +846,9 @@
           if (r.product && r.source === "network") {
             filled++;
             searchIndex = null;                 // new product joins search
-            return S.removePending(row.code);
+            return fillSavedProduct(r.product).then(function () {
+              return S.removePending(row.code);
+            });
           }
           if (r.error === L.ERR.NOT_FOUND) return S.removePending(row.code);
           return S.bumpPending(row.code);       // still unreachable; try later
@@ -816,10 +862,23 @@
       if (filled) {
         status($("scanStatus"),
           filled + " scanned item" + (filled === 1 ? "" : "s") + " filled in from Open Food Facts.", "ok");
+        renderFoods();   // saved placeholders may now have real nutrition
       }
       updateDbLine();
       return filled;
     }, function () { reconciling = false; return 0; });
+  }
+
+  /** If a resolved product was saved as a pending placeholder, fill it in. */
+  function fillSavedProduct(product) {
+    if (!product || !product.code) return Promise.resolve();
+    var id = "product:" + product.code;
+    return S.getAll("foods").then(function (foods) {
+      var existing = foods.filter(function (f) { return f.id === id; })[0];
+      // Only replace a stub awaiting fill-in; never a food the user curated.
+      if (existing && existing.pending) return S.put("foods", L.foodFromProduct(product));
+      return null;
+    }, function () { return null; });
   }
 
   // ------------------------------------------------ offline-database status

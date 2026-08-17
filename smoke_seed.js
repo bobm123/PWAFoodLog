@@ -70,6 +70,17 @@ const { spawn } = require("child_process");
   ok("seeded barcode renders a product", /Coca-Cola/i.test(await page.locator("#productCard").textContent()));
   ok("seeded barcode made ZERO network calls", offCalls === 0, "calls="+offCalls);
 
+  // ---- Save Product: keep a scanned product in the frequent-foods list ----
+  await page.click("#btnSaveProduct");
+  await page.waitForTimeout(200);
+  ok("Save product confirms", /saved|updated/i.test(await page.locator("#scanStatus").textContent()));
+  const savedProduct = await page.evaluate(() => new Promise(res => {
+    const r = indexedDB.open("foodlog");
+    r.onsuccess = () => { const g = r.result.transaction("foods","readonly").objectStore("foods").get("product:0049000042566");
+      g.onsuccess = () => res(g.result ? { name: g.result.name, type: g.result.type } : null); g.onerror = () => res(null); };
+  }));
+  ok("saved product lands in Foods, keyed by barcode", savedProduct && savedProduct.type === "product", JSON.stringify(savedProduct));
+
   // ---- offline search still works from the seed ----
   await ctx.setOffline(true);
   await page.evaluate(() => window.dispatchEvent(new Event("offline")));
@@ -89,7 +100,17 @@ const { spawn } = require("child_process");
       c.onsuccess = () => res(c.result); c.onerror = () => res(-1); };
   }));
   ok("offline unknown scan enqueued as pending", pendingCount === 1, "pending="+pendingCount);
-  ok("offline scan offers manual entry", /enter it by hand/i.test(await page.locator("#productCard").textContent()));
+  ok("offline scan offers Save for later", await page.locator("#btnSaveLater").count() === 1);
+
+  // ---- Save for later: capture the barcode as a placeholder food ----
+  await page.click("#btnSaveLater");
+  await page.waitForTimeout(200);
+  const placeholder = await page.evaluate(() => new Promise(res => {
+    const r = indexedDB.open("foodlog");
+    r.onsuccess = () => { const g = r.result.transaction("foods","readonly").objectStore("foods").get("product:1111111111");
+      g.onsuccess = () => res(g.result ? { pending: !!g.result.pending, name: g.result.name } : null); g.onerror = () => res(null); };
+  }));
+  ok("offline barcode saved as a pending placeholder food", placeholder && placeholder.pending === true, JSON.stringify(placeholder));
 
   // ---- come back online -> reconciler fills it in and clears pending ----
   await ctx.setOffline(false);
@@ -107,6 +128,13 @@ const { spawn } = require("child_process");
       g.onsuccess = () => res(!!g.result); g.onerror = () => res(false); };
   }));
   ok("enriched product now in the cache", nowCached);
+  // the saved placeholder food should now carry real nutrition
+  const filled = await page.evaluate(() => new Promise(res => {
+    const r = indexedDB.open("foodlog");
+    r.onsuccess = () => { const g = r.result.transaction("foods","readonly").objectStore("foods").get("product:1111111111");
+      g.onsuccess = () => res(g.result ? { pending: !!g.result.pending, name: g.result.name, carb: g.result.per100.carb } : null); g.onerror = () => res(null); };
+  }));
+  ok("saved placeholder filled in with real nutrition", filled && !filled.pending && filled.carb > 0, JSON.stringify(filled));
 
   // ---- version guard: reload does NOT re-import (same seed version) ----
   const before = await page.evaluate(() => new Promise(res => {

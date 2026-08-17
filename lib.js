@@ -249,6 +249,51 @@
     };
   }
 
+  /**
+   * Convert a normalized product (from a scan/lookup/search) into a saveable
+   * food for the frequently-purchased list. Keyed by barcode so re-saving the
+   * same product updates it rather than duplicating. per100 is carried through
+   * unchanged, so logging a serving computes identical macros to the card.
+   */
+  function foodFromProduct(p) {
+    p = p || {};
+    var per = p.per100 || {};
+    var serving = num(p.servingGrams) > 0 ? num(p.servingGrams) : 100;
+    var slug = (p.code ? p.code : (p.name || "item").toLowerCase().replace(/[^a-z0-9]+/g, "-"));
+    return {
+      id: "product:" + slug,
+      type: "product",
+      name: p.name || "(unnamed product)",
+      brand: p.brand || "",
+      code: p.code || "",
+      servingGrams: serving,
+      servingLabel: p.servingSize ? String(p.servingSize) : "1 serving (" + Math.round(serving) + " g)",
+      per100: {
+        fat: num(per.fat), carb: num(per.carb), fiber: num(per.fiber),
+        protein: num(per.protein), sugars: num(per.sugars),
+        kcal: (per.kcal !== null && per.kcal !== undefined) ? num(per.kcal) : null
+      },
+      nova: p.nova || null,
+      additives: p.additives || [],
+      ingredientsText: p.ingredientsText || "",
+      flags: p.flags || []
+    };
+  }
+
+  /** A stub food for a barcode scanned with no connectivity, filled in later. */
+  function pendingProductFood(code, name) {
+    return {
+      id: "product:" + String(code),
+      type: "product",
+      name: name || ("Scanned product " + code),
+      brand: "", code: String(code),
+      servingGrams: 100, servingLabel: "1 serving (100 g)",
+      per100: { fat: 0, carb: 0, fiber: 0, protein: 0, sugars: 0, kcal: null },
+      nova: null, additives: [], ingredientsText: "", flags: [],
+      pending: true
+    };
+  }
+
   // ------------------------------------------------------------------ meals
   var MEALS = ["breakfast", "lunch", "dinner", "snack"];
   var MEAL_LABELS = {
@@ -604,6 +649,8 @@
     estimateKcal: estimateKcal,
     dailyTotals: dailyTotals,
     recipeFromAnalyzerJson: recipeFromAnalyzerJson,
+    foodFromProduct: foodFromProduct,
+    pendingProductFood: pendingProductFood,
     barcodeVariants: barcodeVariants,
     MEALS: MEALS,
     MEAL_LABELS: MEAL_LABELS,
