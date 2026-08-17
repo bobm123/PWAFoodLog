@@ -369,6 +369,33 @@
     return n;
   }
 
+  // -------------------------------------------------------- targets / goals
+  /**
+   * Progress of a consumed amount toward a daily target. `pct` is clamped to
+   * 0..100 for a bar; `over` and `remaining` are not clamped so the UI can say
+   * "12 g over" or "340 left". hasTarget is false when no target is set, so the
+   * UI falls back to just showing the consumed amount.
+   */
+  function macroProgress(consumed, target) {
+    var c = num(consumed), t = num(target);
+    if (!(t > 0)) return { hasTarget: false, pct: 0, over: false, remaining: null };
+    return {
+      hasTarget: true,
+      pct: Math.max(0, Math.min(100, c / t * 100)),
+      over: c > t,
+      remaining: t - c
+    };
+  }
+
+  // ------------------------------------------------------------- hydration
+  var WATER_GOAL_DEFAULT = 64;      // fl oz (~8 cups)
+  var WATER_PRESETS = [8, 12, 16];  // glass / cup / bottle, fl oz
+
+  /** Add (or subtract) water, never dropping below zero. */
+  function addOz(current, delta) {
+    return Math.max(0, num(current) + num(delta));
+  }
+
   // ---------------------------------------------------------------- search
   /** Normalize one page of OFF search results into internal product shape. */
   function normalizeSearchResults(json) {
@@ -587,6 +614,10 @@
     dateRange: dateRange,
     historyDays: historyDays,
     streakUnderBudget: streakUnderBudget,
+    macroProgress: macroProgress,
+    addOz: addOz,
+    WATER_GOAL_DEFAULT: WATER_GOAL_DEFAULT,
+    WATER_PRESETS: WATER_PRESETS,
     normalizeSearchResults: normalizeSearchResults,
     SEARCH_ERR_MESSAGE: SEARCH_ERR_MESSAGE,
     searchLocal: searchLocal,

@@ -1,8 +1,8 @@
 const { chromium } = require("playwright");
 const { spawn } = require("child_process");
 (async () => {
-  const server = spawn("python3", ["-m", "http.server", "8130"], { cwd: __dirname });
-  await new Promise(r => setTimeout(r, 1000));
+  const server = spawn("python3", ["-m", "http.server", "8151"], { cwd: __dirname });
+  await new Promise(r => setTimeout(r, 1600));
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: "block" });
   const page = await ctx.newPage();
@@ -31,11 +31,11 @@ const { spawn } = require("child_process");
     return route.fulfill({ contentType:"application/json", body: JSON.stringify({ status:0 }) });
   });
 
-  await page.goto("http://localhost:8130/");
+  await page.goto("http://localhost:8151/");
   // wait for seed import (first run)
   await page.waitForFunction(async () => {
     return await new Promise(res => {
-      const r = indexedDB.open("foodlog", 3);
+      const r = indexedDB.open("foodlog");
       r.onsuccess = () => { try {
         const tx = r.result.transaction("products","readonly");
         const c = tx.objectStore("products").count();
@@ -84,7 +84,7 @@ const { spawn } = require("child_process");
   await page.click("#btnLookup");
   await page.waitForTimeout(300);
   const pendingCount = await page.evaluate(() => new Promise(res => {
-    const r = indexedDB.open("foodlog",3);
+    const r = indexedDB.open("foodlog");
     r.onsuccess = () => { const c = r.result.transaction("pending","readonly").objectStore("pending").count();
       c.onsuccess = () => res(c.result); c.onerror = () => res(-1); };
   }));
@@ -96,13 +96,13 @@ const { spawn } = require("child_process");
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
   await page.waitForTimeout(1500);
   const pendingAfter = await page.evaluate(() => new Promise(res => {
-    const r = indexedDB.open("foodlog",3);
+    const r = indexedDB.open("foodlog");
     r.onsuccess = () => { const c = r.result.transaction("pending","readonly").objectStore("pending").count();
       c.onsuccess = () => res(c.result); };
   }));
   ok("reconciler cleared the pending code once online", pendingAfter === 0, "pending="+pendingAfter);
   const nowCached = await page.evaluate(() => new Promise(res => {
-    const r = indexedDB.open("foodlog",3);
+    const r = indexedDB.open("foodlog");
     r.onsuccess = () => { const g = r.result.transaction("products","readonly").objectStore("products").get("1111111111");
       g.onsuccess = () => res(!!g.result); g.onerror = () => res(false); };
   }));
@@ -110,14 +110,14 @@ const { spawn } = require("child_process");
 
   // ---- version guard: reload does NOT re-import (same seed version) ----
   const before = await page.evaluate(() => new Promise(res => {
-    const r = indexedDB.open("foodlog",3);
+    const r = indexedDB.open("foodlog");
     r.onsuccess = () => { const c = r.result.transaction("products","readonly").objectStore("products").count();
       c.onsuccess = () => res(c.result); };
   }));
   await page.reload();
   await page.waitForTimeout(800);
   const after = await page.evaluate(() => new Promise(res => {
-    const r = indexedDB.open("foodlog",3);
+    const r = indexedDB.open("foodlog");
     r.onsuccess = () => { const c = r.result.transaction("products","readonly").objectStore("products").count();
       c.onsuccess = () => res(c.result); };
   }));

@@ -56,6 +56,11 @@ each hit `high` or `moderate` severity with a short explanation.
   recorded to a pending queue; the moment you're back online the app quietly
   resolves it from Open Food Facts and caches it — without overwriting anything
   you entered by hand.
+- **Daily targets** for calories, net carbs, fat, and protein (Settings → Daily
+  targets). The dashboard shows a net-carb ring plus a goal bar and "remaining"
+  for each macro; the History calories chart draws your calorie goal line.
+- **Hydration tracking**: a water card on the diary with quick-add buttons
+  (+8/+12/+16 oz) against a daily goal, stored per day and included in backups.
 - **NOVA 1–4 processing badge** and **high-GI ingredient flags** on every product.
 - **Meals**: every entry belongs to breakfast, lunch, dinner or a snack
   (defaulted from the time of day), and the diary groups entries by meal with

@@ -12,7 +12,7 @@
   "use strict";
 
   var DB_NAME = "foodlog";
-  var DB_VERSION = 3;
+  var DB_VERSION = 4;
   var _db = null;
 
   function open() {
@@ -41,6 +41,10 @@
         // filled in from Open Food Facts once a connection is available.
         if (!db.objectStoreNames.contains("pending")) {
           db.createObjectStore("pending", { keyPath: "code" });
+        }
+        // v4: daily water intake, keyed by YYYY-MM-DD.
+        if (!db.objectStoreNames.contains("water")) {
+          db.createObjectStore("water", { keyPath: "date" });
         }
       };
       req.onsuccess = function () { _db = req.result; resolve(_db); };
@@ -104,6 +108,16 @@
         req.onerror = function () { reject(req.error); };
       });
     });
+  }
+
+  // ---------------------------------------------------------------- water
+  /** Water (fl oz) logged for a date; 0 if none. */
+  function getWater(date) {
+    return tx("water", "readonly", function (s) { return s.get(String(date)); })
+      .then(function (row) { return row ? Number(row.oz) || 0 : 0; }, function () { return 0; });
+  }
+  function setWater(date, oz) {
+    return put("water", { date: String(date), oz: Math.max(0, Number(oz) || 0) });
   }
 
   function getSetting(key, fallback) {
@@ -208,13 +222,13 @@
   function exportAll() {
     // The product cache is deliberately NOT exported: it is a disposable
     // mirror of Open Food Facts, not user data, and would bloat the backup.
-    return Promise.all([getAll("entries"), getAll("foods"), getAll("settings")])
+    return Promise.all([getAll("entries"), getAll("foods"), getAll("settings"), getAll("water")])
       .then(function (r) {
         return {
           format: "foodlog-export",
-          version: 1,
+          version: 2,
           exportedAt: new Date().toISOString(),
-          entries: r[0], foods: r[1], settings: r[2]
+          entries: r[0], foods: r[1], settings: r[2], water: r[3]
         };
       });
   }
@@ -229,7 +243,7 @@
       return Promise.reject(new Error("Not a food log export file"));
     }
     var wipe = mode === "replace"
-      ? Promise.all([clear("entries"), clear("foods"), clear("settings")])
+      ? Promise.all([clear("entries"), clear("foods"), clear("settings"), clear("water")])
       : Promise.resolve();
 
     return wipe.then(function () {
@@ -241,6 +255,8 @@
       });
       (blob.foods || []).forEach(function (f) { jobs.push(put("foods", f)); });
       (blob.settings || []).forEach(function (s) { jobs.push(put("settings", s)); });
+      // Water is keyed by date; on merge, the imported day's value wins.
+      (blob.water || []).forEach(function (w) { jobs.push(put("water", w)); });
       return Promise.all(jobs);
     }).then(function () {
       return {
@@ -253,6 +269,7 @@
   root.Store = {
     open: open, getAll: getAll, put: put, del: del, clear: clear,
     entriesForDate: entriesForDate, entriesForRange: entriesForRange,
+    getWater: getWater, setWater: setWater,
     getCachedProduct: getCachedProduct, putCachedProduct: putCachedProduct,
     getAllCachedProducts: getAllCachedProducts,
     countProducts: countProducts, importProducts: importProducts,

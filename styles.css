@@ -3,6 +3,7 @@
   --bg:#0f1211; --card:#181d1b; --line:#2a322e; --fg:#e8ede9; --dim:#93a099;
   --green:#3fbf7f; --amber:#e8b046; --red:#e0575b; --blue:#5aa9e6;
   --fat:#e8b046; --carb:#e0575b; --prot:#5aa9e6;
+  --ring-track:#242c28;
 }
 *{box-sizing:border-box}
 body{
@@ -23,26 +24,65 @@ h2{font-size:1rem;margin:0 0 .5rem}
   background:rgba(255,255,255,.12);border:0;color:#fff;padding:.35rem .5rem;border-radius:8px;font-size:.9rem;
 }
 
-.totals{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line)}
-.tot{background:var(--bg);padding:.6rem .25rem;text-align:center}
-.tval{display:block;font-size:1.25rem;font-weight:600}
-.tlab{display:block;font-size:.7rem;color:var(--dim);text-transform:uppercase;letter-spacing:.04em}
-#tNetCarb{color:var(--carb)}
-#tNetCarb.over{color:#fff;background:var(--red);border-radius:6px;padding:0 .3rem}
-
-.splitbar{display:flex;height:6px;overflow:hidden}
-.splitbar span{display:block;height:100%}
-.sfat{background:var(--fat)} .scarb{background:var(--carb)} .sprot{background:var(--prot)}
-.splitlabel{margin:.35rem 1rem .5rem;font-size:.72rem;color:var(--dim);text-align:center}
-
-.tabs{display:grid;grid-template-columns:repeat(5,1fr);border-bottom:1px solid var(--line)}
-.tab{
-  background:none;border:0;color:var(--dim);padding:.7rem 0;font-size:.9rem;
-  border-bottom:2px solid transparent;cursor:pointer;
+/* ---- dashboard hero (net-carb ring + macro readout) ---- */
+.hero{padding:1rem}
+.hero-top{display:flex;align-items:center;gap:1.1rem}
+.ring{
+  width:108px;height:108px;border-radius:50%;flex:none;display:grid;place-items:center;
+  background:conic-gradient(var(--green) 0%, var(--ring-track) 0);
+  transition:background .3s ease;
 }
-.tab.active{color:var(--fg);border-bottom-color:var(--green)}
+.ring-hole{
+  width:84px;height:84px;border-radius:50%;background:var(--card);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+}
+.ring-num{font-size:1.7rem;font-weight:700;line-height:1;color:var(--fg)}
+#tNetCarb{color:var(--fg)}
+#tNetCarb.over{color:var(--red)}
+.ring-unit{font-size:.58rem;color:var(--dim);text-transform:uppercase;letter-spacing:.03em;text-align:center;padding:0 .35rem}
+.hero-stats{flex:1;display:flex;flex-direction:column;gap:.55rem}
+.gstat{display:flex;flex-direction:column;gap:.28rem}
+.grow{display:flex;align-items:baseline;justify-content:space-between}
+.hlab{font-size:.72rem;color:var(--dim);text-transform:uppercase;letter-spacing:.03em}
+.hval{font-size:1.05rem;font-weight:600}
+.htgt{color:var(--dim);font-weight:400;font-size:.8rem}
+.gbar{height:5px;border-radius:999px;background:var(--ring-track);overflow:hidden}
+.gbar>span{display:block;height:100%;width:0;background:var(--green);border-radius:999px;transition:width .3s ease}
+.gbar>span.over{background:var(--red)}
+.gbar.big{height:8px;margin-top:.5rem}
+.splitlabel{margin:.7rem 0 0;font-size:.72rem;color:var(--dim);text-align:center}
 
-main{padding:.75rem}
+/* ---- hydration ---- */
+.water .water-top{display:flex;justify-content:space-between;align-items:baseline}
+.water-title{font-weight:600;font-size:.95rem}
+.water-amt{font-size:.85rem;color:var(--dim)}
+.water-amt b{color:var(--blue);font-size:1.05rem}
+.water #barWater{background:var(--blue)}
+.water-btns{display:flex;gap:.5rem;margin-top:.7rem}
+.wbtn{
+  flex:1;background:#0d100f;border:1px solid var(--line);color:var(--fg);
+  border-radius:8px;padding:.5rem 0;font-size:.85rem;cursor:pointer;font-weight:600;
+}
+.wbtn:active{background:#111614}
+.wbtn.wminus{flex:0 0 3.2rem;color:var(--dim)}
+
+/* ---- bottom navigation ---- */
+.tabs{
+  position:fixed;left:0;right:0;bottom:0;z-index:7;
+  display:grid;grid-template-columns:repeat(5,1fr);
+  background:var(--card);border-top:1px solid var(--line);
+  padding-bottom:env(safe-area-inset-bottom);
+}
+.tab{
+  background:none;border:0;color:var(--dim);cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:3px;
+  padding:.5rem 0 .4rem;font-size:.6rem;text-transform:uppercase;letter-spacing:.03em;
+}
+.tab svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.tab.active{color:var(--green)}
+.tab .tl{line-height:1}
+
+main{padding:.75rem .75rem 5.5rem}
 .panel{display:none}
 .panel.active{display:block}
 
@@ -123,8 +163,8 @@ button:disabled{opacity:.5}
 
 /* ---- floating add button + add sheet ---- */
 .fab{
-  position:fixed; right:1rem; z-index:7;
-  bottom:calc(1rem + env(safe-area-inset-bottom));
+  position:fixed; right:1rem; z-index:8;
+  bottom:calc(4.75rem + env(safe-area-inset-bottom));  /* clear the bottom nav */
   width:56px; height:56px; border-radius:50%;
   background:var(--green); color:#06160e;
   font-size:2rem; line-height:1; font-weight:400;
@@ -165,7 +205,7 @@ button:disabled{opacity:.5}
 .sheet .grid2{margin-top:.25rem}
 
 /* keep the last diary row clear of the floating + */
-#panel-today{padding-bottom:5.5rem}
+#panel-today{padding-bottom:7.5rem}   /* clear the FAB + bottom nav */
 
 /* ---- segmented controls (meal picker, history range) ---- */
 .seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
@@ -179,12 +219,19 @@ button:disabled{opacity:.5}
 
 /* ---- meal group headers in the diary ---- */
 .mealhead{
-  display:flex;justify-content:space-between;align-items:baseline;
-  margin:.9rem .1rem .35rem;font-size:.8rem;
+  display:flex;justify-content:space-between;align-items:center;
+  margin:1rem .1rem .35rem;font-size:.8rem;
+  border-bottom:1px solid var(--line);padding-bottom:.3rem;
 }
-.mealhead:first-child{margin-top:.1rem}
-.mealhead b{font-size:.85rem;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
+.mealhead:first-child{margin-top:.2rem}
+.mealhead .mh-left{display:flex;align-items:center;gap:.15rem}
+.mealhead b{font-size:.85rem;text-transform:uppercase;letter-spacing:.05em;color:var(--fg)}
 .mealhead .sub{font-size:.72rem;color:var(--dim)}
+.meal-add{
+  background:none;border:0;color:var(--green);cursor:pointer;
+  font-size:1.25rem;line-height:1;padding:0 .35rem;
+}
+.meal-add:active{opacity:.6}
 
 /* ---- inline entry editor ---- */
 .editrow{display:flex;gap:.4rem;align-items:center;margin-top:.5rem;flex-wrap:wrap}
@@ -202,7 +249,9 @@ button:disabled{opacity:.5}
 .chartwrap .bar{cursor:pointer}
 .chartwrap .axis{fill:var(--dim);font-size:9px}
 .histstats{display:grid;grid-template-columns:repeat(2,1fr);gap:.6rem}
-.histstats .tot{background:#0d100f;border:1px solid var(--line);border-radius:10px;padding:.6rem .4rem}
+.histstats .tot{background:#0d100f;border:1px solid var(--line);border-radius:10px;padding:.6rem .4rem;text-align:center}
+.tval{display:block;font-size:1.25rem;font-weight:600}
+.tlab{display:block;font-size:.7rem;color:var(--dim);text-transform:uppercase;letter-spacing:.04em}
 
 /* ---- add-sheet recents ---- */
 .sheet-sub{

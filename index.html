@@ -24,29 +24,55 @@
   <input type="date" id="dayPicker" aria-label="Log date">
 </header>
 
-<!-- Daily totals summary, always visible -->
-<section class="totals" id="totals" aria-live="polite">
-  <div class="tot"><span class="tval" id="tNetCarb">0</span><span class="tlab">net carbs</span></div>
-  <div class="tot"><span class="tval" id="tFat">0</span><span class="tlab">fat</span></div>
-  <div class="tot"><span class="tval" id="tProtein">0</span><span class="tlab">protein</span></div>
-  <div class="tot"><span class="tval" id="tKcal">0</span><span class="tlab">kcal</span></div>
-</section>
-<div class="splitbar" id="splitBar" title="Calorie split">
-  <span class="sfat"></span><span class="scarb"></span><span class="sprot"></span>
-</div>
-<p class="splitlabel" id="splitLabel"></p>
-
-<nav class="tabs" role="tablist">
-  <button class="tab active" data-tab="today" role="tab">Today</button>
-  <button class="tab" data-tab="scan" role="tab">Find</button>
-  <button class="tab" data-tab="history" role="tab">History</button>
-  <button class="tab" data-tab="foods" role="tab">Foods</button>
-  <button class="tab" data-tab="settings" role="tab">Settings</button>
-</nav>
-
 <main>
   <!-- ------------------------------ TODAY ------------------------------ -->
   <section id="panel-today" class="panel active">
+
+    <!-- Dashboard hero: net-carb ring + goal-aware macro bars. -->
+    <section class="hero card" id="totals" aria-live="polite">
+      <div class="hero-top">
+        <div class="ring" id="carbRing" role="img" aria-label="Net carbs for the day">
+          <div class="ring-hole">
+            <span class="ring-num" id="tNetCarb">0</span>
+            <span class="ring-unit" id="carbUnit">g net carbs</span>
+          </div>
+        </div>
+        <div class="hero-stats">
+          <div class="gstat">
+            <div class="grow"><span class="hlab">Calories</span>
+              <span class="hval"><b id="tKcal">0</b><span class="htgt" id="tgtKcal"></span></span></div>
+            <div class="gbar"><span id="barKcal"></span></div>
+          </div>
+          <div class="gstat">
+            <div class="grow"><span class="hlab">Fat</span>
+              <span class="hval"><b id="tFat">0</b> g<span class="htgt" id="tgtFat"></span></span></div>
+            <div class="gbar"><span id="barFat"></span></div>
+          </div>
+          <div class="gstat">
+            <div class="grow"><span class="hlab">Protein</span>
+              <span class="hval"><b id="tProtein">0</b> g<span class="htgt" id="tgtProtein"></span></span></div>
+            <div class="gbar"><span id="barProtein"></span></div>
+          </div>
+        </div>
+      </div>
+      <p class="splitlabel" id="splitLabel"></p>
+    </section>
+
+    <!-- Hydration -->
+    <section class="card water" id="waterCard">
+      <div class="water-top">
+        <span class="water-title">💧 Water</span>
+        <span class="water-amt"><b id="waterOz">0</b> / <span id="waterGoalLbl">64</span> oz</span>
+      </div>
+      <div class="gbar big"><span id="barWater"></span></div>
+      <div class="water-btns">
+        <button class="wbtn" data-water="8">+8</button>
+        <button class="wbtn" data-water="12">+12</button>
+        <button class="wbtn" data-water="16">+16</button>
+        <button class="wbtn wminus" data-water="-8">&minus;8</button>
+      </div>
+    </section>
+
     <div id="entryList" class="list"></div>
     <p class="empty" id="todayEmpty">
       Nothing logged yet.<br>
@@ -150,13 +176,16 @@
   <!-- ---------------------------- SETTINGS ----------------------------- -->
   <section id="panel-settings" class="panel">
     <div class="card">
-      <h2>Net-carb budget</h2>
-      <label class="inline">
-        Daily net-carb target (g)
-        <input id="setCarbTarget" type="number" step="any" placeholder="20">
-      </label>
-      <p class="hint">Leave blank to just track totals with no target. Set it to see a progress bar and an over-budget warning.</p>
-      <button id="btnSaveSettings" class="primary">Save</button>
+      <h2>Daily targets</h2>
+      <p class="hint">Your goals for the day. Leave any blank to just track it with no target. Net carbs = carbs &minus; fiber.</p>
+      <div class="grid2">
+        <label>Calories<input id="setKcal" type="number" step="any" inputmode="numeric" placeholder="2000"></label>
+        <label>Net carbs (g)<input id="setCarbTarget" type="number" step="any" inputmode="numeric" placeholder="20"></label>
+        <label>Fat (g)<input id="setFat" type="number" step="any" inputmode="numeric" placeholder="150"></label>
+        <label>Protein (g)<input id="setProtein" type="number" step="any" inputmode="numeric" placeholder="120"></label>
+        <label>Water goal (oz)<input id="setWater" type="number" step="any" inputmode="numeric" placeholder="64"></label>
+      </div>
+      <button id="btnSaveSettings" class="primary" style="margin-top:.6rem">Save targets</button>
       <p class="status" id="settingsStatus"></p>
     </div>
 
@@ -203,7 +232,31 @@
   </section>
 </main>
 
-<!-- Floating add button: only meaningful on the Today tab. -->
+<!-- Bottom navigation (mobile-app style, thumb-reachable). -->
+<nav class="tabs" role="tablist" aria-label="Sections">
+  <button class="tab active" data-tab="today" role="tab" aria-label="Today">
+    <svg viewBox="0 0 24 24"><circle cx="4.5" cy="7" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="17" r="1"/><line x1="8" y1="7" x2="19" y2="7"/><line x1="8" y1="12" x2="19" y2="12"/><line x1="8" y1="17" x2="19" y2="17"/></svg>
+    <span class="tl">Today</span>
+  </button>
+  <button class="tab" data-tab="scan" role="tab" aria-label="Find">
+    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><line x1="20" y1="20" x2="15.5" y2="15.5"/></svg>
+    <span class="tl">Find</span>
+  </button>
+  <button class="tab" data-tab="history" role="tab" aria-label="History">
+    <svg viewBox="0 0 24 24"><polyline points="4,15 9,10 13,13 20,5"/><line x1="4" y1="20" x2="20" y2="20"/></svg>
+    <span class="tl">History</span>
+  </button>
+  <button class="tab" data-tab="foods" role="tab" aria-label="Foods">
+    <svg viewBox="0 0 24 24"><polygon points="12,4 14.2,9.2 20,9.6 15.5,13.4 17,19 12,16 7,19 8.5,13.4 4,9.6 9.8,9.2"/></svg>
+    <span class="tl">Foods</span>
+  </button>
+  <button class="tab" data-tab="settings" role="tab" aria-label="Settings">
+    <svg viewBox="0 0 24 24"><line x1="4" y1="8" x2="20" y2="8"/><circle cx="10" cy="8" r="2.2"/><line x1="4" y1="16" x2="20" y2="16"/><circle cx="15" cy="16" r="2.2"/></svg>
+    <span class="tl">Settings</span>
+  </button>
+</nav>
+
+<!-- Floating add button, above the bottom nav. -->
 <button id="fabAdd" class="fab" aria-label="Add an entry" title="Add an entry">+</button>
 
 <!-- Add-entry sheet -->

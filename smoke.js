@@ -74,11 +74,26 @@ function ok(n, c, x) { if (c) { pass++; console.log("  [OK]   " + n); } else { f
   await page.waitForTimeout(300);
   ok("recent tap logs a third row", await page.locator("#entryList .item").count() === 3);
 
-  // ---- name search (mocked network) ----
+  // ---- name search (local-first over the bundled seed) ----
+  // Wait for the seed import to finish (seedVersion is set only after it does),
+  // otherwise a large seed is still importing when we search.
+  await page.waitForFunction(() => new Promise(res => {
+    const r = indexedDB.open("foodlog");
+    r.onsuccess = () => { try {
+      const g = r.result.transaction("settings", "readonly").objectStore("settings").get("seedVersion");
+      g.onsuccess = () => res(!!(g.result && g.result.value));
+      g.onerror = () => res(false);
+    } catch (e) { res(false); } };
+    r.onerror = () => res(false);
+  }), null, { timeout: 15000 });
   await page.click('.tab[data-tab="scan"]');
   await page.fill("#searchQuery", "greek yogurt");
   await page.click("#btnSearch");
-  await page.waitForTimeout(400);
+  // First search builds the in-memory index over the whole seed; with the real
+  // 25k database that can take ~1s, so wait for results rather than a fixed beat.
+  await page.waitForFunction(
+    () => document.querySelectorAll("#searchResults .item").length > 0,
+    null, { timeout: 8000 });
   ok("local-first search returns a seeded greek yogurt", await page.locator("#searchResults .item").count() >= 1);
   await page.click('#searchResults .item');
   await page.waitForTimeout(300);
@@ -105,16 +120,48 @@ function ok(n, c, x) { if (c) { pass++; console.log("  [OK]   " + n); } else { f
   await page.context().setOffline(false);
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
 
-  // ---- budget + history ----
+  // ---- daily targets (calories/carbs/fat/protein) + water goal ----
   await page.click('.tab[data-tab="settings"]');
   await page.fill("#setCarbTarget", "20");
+  await page.fill("#setKcal", "2000");
+  await page.fill("#setFat", "150");
+  await page.fill("#setProtein", "120");
+  await page.fill("#setWater", "64");
   await page.click("#btnSaveSettings");
   await page.waitForTimeout(200);
+  ok("targets saved confirmation", /saved/i.test(await page.locator("#settingsStatus").textContent()));
+
+  // hero reflects the targets
+  await page.click('.tab[data-tab="today"]');
+  await page.waitForTimeout(300);
+  ok("calorie target caption shows", /\/ 2000/.test(await page.locator("#tgtKcal").textContent()),
+     await page.locator("#tgtKcal").textContent());
+  ok("fat target caption shows", /\/ 150/.test(await page.locator("#tgtFat").textContent()));
+  ok("protein goal bar has width", await page.evaluate(() => {
+    const w = document.getElementById("barProtein").style.width; return w && w !== "0%";
+  }));
+
+  // ---- hydration ----
+  ok("water starts at 0", (await page.locator("#waterOz").textContent()) === "0");
+  await page.click('.wbtn[data-water="16"]');
+  await page.click('.wbtn[data-water="8"]');
+  await page.waitForTimeout(200);
+  ok("water adds to 24 oz", (await page.locator("#waterOz").textContent()) === "24");
+  await page.click('.wbtn[data-water="-8"]');
+  await page.waitForTimeout(150);
+  ok("water subtracts to 16 oz", (await page.locator("#waterOz").textContent()) === "16");
+  ok("water goal label shows 64", (await page.locator("#waterGoalLbl").textContent()) === "64");
+  ok("water bar has width", await page.evaluate(() => {
+    const w = document.getElementById("barWater").style.width; return w && w !== "0%";
+  }));
+
+  // ---- history ----
   await page.click('.tab[data-tab="history"]');
   await page.waitForTimeout(400);
   ok("carb chart renders bars", await page.locator("#carbChart rect").count() > 10);
   ok("kcal chart renders", await page.locator("#kcalChart svg").count() === 1);
-  ok("budget line labeled", /budget 20 g/.test(await page.locator("#carbChart").innerHTML()));
+  ok("carb goal line labeled", /goal 20 g/.test(await page.locator("#carbChart").innerHTML()));
+  ok("calorie goal line labeled", /goal 2000/.test(await page.locator("#kcalChart").innerHTML()));
   ok("streak line mentions the target", /20 g/.test(await page.locator("#streakLine").textContent()));
   const stats = await page.locator("#histStats .tot").count();
   ok("four stat tiles", stats === 4, stats);

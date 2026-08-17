@@ -9,6 +9,8 @@
   var scanner = null;
   var currentProduct = null;
   var carbTarget = null;
+  var calorieTarget = null, fatTarget = null, proteinTarget = null;
+  var waterGoal = 64;   // fl oz; L.WATER_GOAL_DEFAULT
   var lastCode = null;                 // for the Retry button
   var LOOKUP_TIMEOUT_MS = 8000;        // bad wireless shouldn't hang forever
   var currentMeal = null;              // meal selected in the add sheet
@@ -192,6 +194,17 @@
   }
 
   // ---------------------------------------------------------------- totals
+  /** Fill one macro goal bar + its "/ target" caption from consumed vs target. */
+  function setGoalBar(barId, tgtId, consumed, target, unit) {
+    var prog = L.macroProgress(consumed, target);
+    var bar = $(barId), tgt = $(tgtId);
+    if (bar) {
+      bar.style.width = prog.hasTarget ? prog.pct + "%" : "0%";
+      bar.classList.toggle("over", prog.over);
+    }
+    if (tgt) tgt.textContent = prog.hasTarget ? " / " + fmt(target, 0) + (unit || "") : "";
+  }
+
   function renderTotals(entries) {
     var t = L.dailyTotals(entries);
     $("tNetCarb").textContent = fmt(t.netCarb, 1);
@@ -199,22 +212,49 @@
     $("tProtein").textContent = fmt(t.protein, 0);
     $("tKcal").textContent = fmt(t.kcal, 0);
 
-    var bar = $("splitBar");
-    bar.querySelector(".sfat").style.width = t.split.fat + "%";
-    bar.querySelector(".scarb").style.width = t.split.carb + "%";
-    bar.querySelector(".sprot").style.width = t.split.protein + "%";
+    // Goal-aware macro bars (fill only when a target is set).
+    setGoalBar("barKcal", "tgtKcal", t.kcal, calorieTarget, "");
+    setGoalBar("barFat", "tgtFat", t.fat, fatTarget, " g");
+    setGoalBar("barProtein", "tgtProtein", t.protein, proteinTarget, " g");
 
-    var lbl = "fat " + fmt(t.split.fat, 0) + "% · carbs " + fmt(t.split.carb, 0) +
-              "% · protein " + fmt(t.split.protein, 0) + "%";
+    // Net-carb ring: fill = consumed/budget; green under, red over.
+    var ring = $("carbRing"), unit = $("carbUnit");
     if (carbTarget) {
       var over = t.netCarb > carbTarget;
+      var pct = Math.max(0, Math.min(100, t.netCarb / carbTarget * 100));
+      var col = over ? "var(--red)" : "var(--green)";
+      if (ring) ring.style.background =
+        "conic-gradient(" + col + " " + pct + "%, var(--ring-track) 0)";
       $("tNetCarb").classList.toggle("over", over);
-      lbl += "  —  " + fmt(t.netCarb, 1) + " / " + carbTarget + " g net carbs" +
-             (over ? " (over budget)" : "");
+      if (unit) unit.textContent = over
+        ? fmt(t.netCarb - carbTarget, 1) + " g over"
+        : fmt(carbTarget - t.netCarb, 1) + " g left";
     } else {
+      if (ring) ring.style.background =
+        "conic-gradient(var(--green) " + (t.count ? 100 : 0) + "%, var(--ring-track) 0)";
       $("tNetCarb").classList.remove("over");
+      if (unit) unit.textContent = "g net carbs";
     }
-    $("splitLabel").textContent = t.count ? lbl : "";
+
+    $("splitLabel").textContent = t.count
+      ? "fat " + fmt(t.split.fat, 0) + "% · carbs " + fmt(t.split.carb, 0) +
+        "% · protein " + fmt(t.split.protein, 0) + "% of calories"
+      : "";
+  }
+
+  // -------------------------------------------------------------- hydration
+  function renderWater() {
+    return S.getWater(viewDate).then(function (oz) {
+      $("waterOz").textContent = fmt(oz, 0);
+      $("waterGoalLbl").textContent = fmt(waterGoal, 0);
+      var pct = waterGoal > 0 ? Math.min(100, oz / waterGoal * 100) : 0;
+      $("barWater").style.width = pct + "%";
+    });
+  }
+  function addWater(delta) {
+    return S.getWater(viewDate).then(function (oz) {
+      return S.setWater(viewDate, L.addOz(oz, delta)).then(renderWater);
+    });
   }
 
   // ----------------------------------------------------------------- today
@@ -258,13 +298,19 @@
       var groups = L.groupByMeal(entries);
       $("entryList").innerHTML = groups.map(function (g) {
         var showHead = !(groups.length === 1 && g.meal === "other");
+        var addBtn = g.meal !== "other"
+          ? '<button class="meal-add" data-mealadd="' + g.meal +
+            '" aria-label="Add to ' + esc(g.label) + '">+</button>'
+          : "";
         return (showHead
-          ? '<div class="mealhead"><b>' + esc(g.label) + "</b><span class=\"sub\">" +
+          ? '<div class="mealhead"><span class="mh-left"><b>' + esc(g.label) + "</b>" + addBtn +
+            '</span><span class="sub">' +
             fmt(g.totals.netCarb, 1) + " g net &middot; " + fmt(g.totals.kcal, 0) + " kcal</span></div>"
           : "") + g.entries.map(renderEntry).join("");
       }).join("");
       $("todayEmpty").classList.toggle("hidden", entries.length > 0);
       renderTotals(entries);
+      renderWater();
     });
   }
 
@@ -604,7 +650,7 @@
         '" y2="' + y(opts.target) +
         '" stroke="var(--fg)" stroke-dasharray="4 3" stroke-width="1" opacity=".7"/>' +
         '<text x="' + (W - padR) + '" y="' + (y(opts.target) - 4) +
-        '" text-anchor="end" class="axis">budget ' + opts.target + " g</text>");
+        '" text-anchor="end" class="axis">goal ' + opts.target + (opts.targetUnit || "") + "</text>");
     }
     return '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="' +
       esc(opts.unit + " per day, last " + n + " days") + '">' + parts.join("") + "</svg>";
@@ -627,11 +673,11 @@
         : "Set a net-carb budget in Settings to see a target line and streak.";
       $("carbChart").innerHTML = barChart(days, {
         value: function (d) { return d.totals.netCarb; },
-        unit: "g net carbs", decimals: 1, target: carbTarget || null
+        unit: "g net carbs", decimals: 1, target: carbTarget || null, targetUnit: " g"
       });
       $("kcalChart").innerHTML = barChart(days, {
         value: function (d) { return d.totals.kcal; },
-        unit: "kcal", decimals: 0, target: null, color: "var(--prot)"
+        unit: "kcal", decimals: 0, target: calorieTarget || null, color: "var(--prot)"
       });
       var logged = days.filter(function (d) { return d.totals.count > 0; });
       function avg(f) {
@@ -792,19 +838,58 @@
   function refreshSeedLine() { updateDbLine(); }
 
   // -------------------------------------------------------------- settings
+  // Each target is a settings key; blank means "no goal, just track it".
+  var TARGETS = [
+    { key: "carbTarget", input: "setCarbTarget", set: function (n) { carbTarget = n; } },
+    { key: "calorieTarget", input: "setKcal", set: function (n) { calorieTarget = n; } },
+    { key: "fatTarget", input: "setFat", set: function (n) { fatTarget = n; } },
+    { key: "proteinTarget", input: "setProtein", set: function (n) { proteinTarget = n; } }
+  ];
+
   function loadSettings() {
-    return S.getSetting("carbTarget", null).then(function (v) {
-      carbTarget = v ? Number(v) : null;
-      $("setCarbTarget").value = carbTarget || "";
+    var jobs = TARGETS.map(function (tg) {
+      return S.getSetting(tg.key, null).then(function (v) {
+        var n = (v === null || v === "" || v === undefined) ? null : Number(v);
+        tg.set(n);
+        var el = $(tg.input);
+        if (el) el.value = n || "";
+      });
     });
+    jobs.push(S.getSetting("waterGoal", L.WATER_GOAL_DEFAULT).then(function (v) {
+      waterGoal = (v > 0) ? Number(v) : L.WATER_GOAL_DEFAULT;
+      var el = $("setWater");
+      if (el) el.value = waterGoal;
+    }));
+    return Promise.all(jobs);
   }
+
   function saveSettings() {
-    var v = $("setCarbTarget").value.trim();
-    var n = v === "" ? null : Number(v);
-    if (v !== "" && !(n > 0)) { status($("settingsStatus"), "Enter a positive number, or leave blank.", "err"); return; }
-    carbTarget = n;
-    S.setSetting("carbTarget", n).then(function () {
-      status($("settingsStatus"), n ? "Budget set to " + n + " g net carbs/day." : "Budget cleared.", "ok");
+    // Validate all fields first (blank or positive), then persist.
+    var vals = {};
+    for (var i = 0; i < TARGETS.length; i++) {
+      var raw = $(TARGETS[i].input).value.trim();
+      if (raw !== "" && !(Number(raw) > 0)) {
+        status($("settingsStatus"), "Enter positive numbers, or leave a field blank.", "err");
+        return;
+      }
+      vals[TARGETS[i].key] = raw === "" ? null : Number(raw);
+    }
+    var wraw = $("setWater").value.trim();
+    if (wraw !== "" && !(Number(wraw) > 0)) {
+      status($("settingsStatus"), "Enter a positive water goal, or leave it blank.", "err");
+      return;
+    }
+    var wGoal = wraw === "" ? L.WATER_GOAL_DEFAULT : Number(wraw);
+
+    var jobs = TARGETS.map(function (tg) {
+      tg.set(vals[tg.key]);
+      return S.setSetting(tg.key, vals[tg.key]);
+    });
+    waterGoal = wGoal;
+    jobs.push(S.setSetting("waterGoal", wGoal));
+
+    Promise.all(jobs).then(function () {
+      status($("settingsStatus"), "Targets saved.", "ok");
       renderToday();
     });
   }
@@ -864,7 +949,7 @@
     });
   }
 
-  function openSheet() {
+  function openSheet(presetMeal) {
     $("sheetDate").textContent = viewDate === today() ? "today" : viewDate;
     $("addSheet").classList.remove("hidden");
     $("sheetBackdrop").classList.remove("hidden");
@@ -872,7 +957,7 @@
     $("savedPicker").classList.add("hidden");
     $("quickForm").classList.add("hidden");
     status($("quickStatus"), "", "");
-    setSheetMeal(nowMeal());
+    setSheetMeal(L.MEAL_LABELS[presetMeal] ? presetMeal : nowMeal());
     renderRecents();
   }
 
@@ -1020,6 +1105,8 @@
       else if (b.dataset.saveedit) saveEditEntry(Number(b.dataset.saveedit));
       else if (b.dataset.canceledit) { editingEntryId = null; renderToday(); }
       else if (b.dataset.again) logAgain(Number(b.dataset.again));
+      else if (b.dataset.mealadd) openSheet(b.dataset.mealadd);
+      else if (b.dataset.water) addWater(Number(b.dataset.water));
       else if (b.dataset.recent !== undefined) {
         var f = recentItems[Number(b.dataset.recent)];
         if (f) {
