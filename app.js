@@ -365,6 +365,27 @@
         fmt(p.per100.fat, 1) + " g</b> &middot; protein <b>" + fmt(p.per100.protein, 1) + " g</b></div>" +
       (p.additives.length ? '<p class="hint">Additives: ' + esc(p.additives.join(", ")) + "</p>" : "") +
       flagWarnBox(p.flags) +
+      (L.hasNutrition(p) ? "" :
+        '<div class="nofacts">' +
+          '<h3>No nutrition data on this record</h3>' +
+          '<p class="flagnote">This barcode\'s entry has no nutrition table, so the zeros above ' +
+            'aren\'t real - logging it would count as 0. Copy the numbers off the package label ' +
+            '(if the label truly says 0, you can ignore this).</p>' +
+          '<button id="btnFixNutrition" class="primary tiny" style="margin-top:.4rem">Add nutrition from the label</button>' +
+          '<div id="fixForm" class="hidden" style="margin-top:.6rem">' +
+            '<div class="grid2">' +
+              '<label>Serving size (g)<input id="fxGrams" type="number" step="any" value="' + serving + '"></label>' +
+              '<label>Calories (blank = auto)<input id="fxKcal" type="number" step="any"></label>' +
+              '<label>Fat (g)<input id="fxFat" type="number" step="any"></label>' +
+              '<label>Total carbs (g)<input id="fxCarb" type="number" step="any"></label>' +
+              '<label>Fiber (g)<input id="fxFiber" type="number" step="any"></label>' +
+              '<label>Protein (g)<input id="fxProtein" type="number" step="any"></label>' +
+            "</div>" +
+            '<p class="hint">Amounts for <em>one serving</em> as printed on the label.</p>' +
+            '<button id="btnApplyFix" class="primary tiny">Save nutrition</button>' +
+            '<p class="status" id="fixStatus"></p>' +
+          "</div>" +
+        "</div>") +
       '<div class="row" style="margin-top:.7rem">' +
         '<input id="portion" type="number" step="any" value="' + serving + '" aria-label="Portion in grams">' +
         '<select id="portionMeal" aria-label="Meal">' + mealOptions(currentMeal || nowMeal()) + "</select>" +
@@ -384,6 +405,53 @@
       addEntry(p, g, $("portionMeal").value);
     });
     $("btnSaveProduct").addEventListener("click", function () { saveProduct(p); });
+    if (!L.hasNutrition(p)) {
+      $("btnFixNutrition").addEventListener("click", function () {
+        $("fixForm").classList.toggle("hidden");
+        $("fxCarb").focus();
+      });
+      $("btnApplyFix").addEventListener("click", function () { applyNutritionFix(p); });
+    }
+  }
+
+  /**
+   * Apply label values typed by the user to a nutrition-less record. The
+   * corrected copy replaces the cached one for that barcode, so every future
+   * scan (and offline search) uses the user's numbers, and any saved food for
+   * the product is updated too.
+   */
+  function applyNutritionFix(p) {
+    var corrected = L.productWithNutrition(p, parseFloat($("fxGrams").value), {
+      kcal: $("fxKcal").value.trim(),
+      fat: parseFloat($("fxFat").value) || 0,
+      carb: parseFloat($("fxCarb").value) || 0,
+      fiber: parseFloat($("fxFiber").value) || 0,
+      protein: parseFloat($("fxProtein").value) || 0
+    });
+    if (!corrected) {
+      status($("fixStatus"), "Enter the serving size in grams.", "err");
+      return;
+    }
+    var jobs = [];
+    if (corrected.code) {
+      jobs.push(S.putCachedProduct(corrected.code, corrected));
+      jobs.push(S.removePending(corrected.code));   // no longer needs enrichment
+      // If this product was saved to Foods (as itself or an offline stub),
+      // carry the corrected numbers over.
+      jobs.push(S.getAll("foods").then(function (foods) {
+        var id = "product:" + corrected.code;
+        var existing = foods.filter(function (f) { return f.id === id; })[0];
+        return existing ? S.put("foods", L.foodFromProduct(corrected)) : null;
+      }));
+    }
+    return Promise.all(jobs).then(function () {
+      searchIndex = null;                       // corrected copy joins search
+      renderProduct(corrected, false);
+      status($("scanStatus"), "Nutrition saved for " + corrected.name +
+        ". Future scans of this barcode use your numbers.", "ok");
+      renderFoods();
+      updateDbLine();
+    });
   }
 
   /** Save a scanned/looked-up product to the frequently-purchased list. */

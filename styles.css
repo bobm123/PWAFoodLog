@@ -143,6 +143,11 @@ button:disabled{opacity:.5}
 .warnbox{border:1px solid #5c2427;background:#2a1214;border-radius:8px;padding:.6rem;margin-top:.6rem}
 .warnbox h3{margin:0 0 .3rem;font-size:.8rem;color:#f0a1a4}
 
+/* missing-nutrition guard on the product card */
+.nofacts{border:1px solid #5a4c1d;background:#241f0e;border-radius:8px;padding:.6rem;margin-top:.6rem}
+.nofacts h3{margin:0 0 .3rem;font-size:.8rem;color:#f0dfa1}
+.nofacts .grid2{margin-top:.2rem}
+
 .prod{display:flex;gap:.75rem;align-items:flex-start}
 .prod img{width:64px;height:64px;object-fit:contain;background:#fff;border-radius:8px;flex:none}
 

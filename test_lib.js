@@ -138,5 +138,48 @@ ok("keyed by barcode (same id as the resolved product)", pp.id === "product:1234
 ok("code carried, zero macros until filled", pp.code === "1234567890" && pp.per100.carb === 0);
 ok("has a placeholder name", /1234567890/.test(pp.name));
 
+console.log("\n-- nutritionMissing: empty table vs real zeros (the A1 duplicate bug) --");
+// A real crowdsourced failure mode: ingredients present, nutrition table EMPTY.
+const a1dupe = L.normalizeProduct({
+  code: "0054400000092", status: 1,
+  product: { product_name: "Original Sauce", brands: "A.1.", nova_group: 4,
+    ingredients_text: "Tomato puree, vinegar, corn syrup, salt, raisin paste",
+    nutriments: {} }
+});
+ok("empty nutriments -> nutritionMissing", a1dupe.nutritionMissing === true);
+ok("hasNutrition false for the empty record", L.hasNutrition(a1dupe) === false);
+ok("GI flags still computed from ingredients", a1dupe.flags.some(f => f.label === "Glucose/corn syrup"));
+// Water: explicit zeros are DATA, not absence. Must not warn.
+const water = L.normalizeProduct({
+  code: "0011110000001", status: 1,
+  product: { product_name: "Spring Water",
+    nutriments: { "energy-kcal_100g": 0, fat_100g: 0, carbohydrates_100g: 0, proteins_100g: 0 } }
+});
+ok("explicit zeros -> nutrition present", water.nutritionMissing === false);
+ok("hasNutrition true for water", L.hasNutrition(water) === true);
+ok("nutella record has nutrition", L.hasNutrition(p) === true);
+// legacy cached objects (no flag): zero-macro heuristic
+ok("legacy all-zero object -> treated as missing", L.hasNutrition({ per100: { fat: 0, carb: 0, protein: 0, kcal: 0 } }) === false);
+ok("legacy nonzero object -> fine", L.hasNutrition({ per100: { fat: 0, carb: 3, protein: 0, kcal: 15 } }) === true);
+ok("null -> false", L.hasNutrition(null) === false);
+
+console.log("\n-- productWithNutrition: correct-from-label (A1: 1 tbsp = 17 g, 3 g carb, 15 kcal) --");
+const fixed = L.productWithNutrition(a1dupe, 17, { kcal: 15, fat: 0, carb: 3, fiber: 0, protein: 0 });
+ok("per100 carb ~17.6", close(fixed.per100.carb, 17.647, 0.01), fixed.per100.carb);
+ok("per100 kcal ~88.2", close(fixed.per100.kcal, 88.235, 0.01), fixed.per100.kcal);
+ok("serving grams recorded", fixed.servingGrams === 17);
+ok("flag cleared + marked corrected", fixed.nutritionMissing === false && fixed.corrected === true);
+ok("hasNutrition true after fix", L.hasNutrition(fixed) === true);
+ok("identity preserved (name/code/nova/flags)", fixed.code === a1dupe.code && fixed.name === "Original Sauce" &&
+   fixed.nova === 4 && fixed.flags.length === a1dupe.flags.length);
+ok("original object untouched", a1dupe.nutritionMissing === true && a1dupe.per100.carb === 0);
+const m17 = L.macrosForGrams(fixed.per100, 17);
+ok("one tbsp logs 3.0 g net carbs", close(m17.netCarb, 3, 0.01), m17.netCarb);
+ok("one tbsp logs 15 kcal", close(m17.kcal, 15, 0.05), m17.kcal);
+// kcal blank -> Atwater estimate from macros
+const atw = L.productWithNutrition(a1dupe, 17, { kcal: "", fat: 0, carb: 3, fiber: 0, protein: 0 });
+ok("blank kcal -> Atwater (3*4=12 per serving)", close(L.macrosForGrams(atw.per100, 17).kcal, 12, 0.05));
+ok("bad serving weight -> null", L.productWithNutrition(a1dupe, 0, { carb: 3 }) === null);
+
 console.log("\n" + (fail ? "FAILED " + fail : "ALL PASSED") + "  (" + pass + " assertions)\n");
 process.exit(fail ? 1 : 0);

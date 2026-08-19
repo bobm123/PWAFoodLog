@@ -103,6 +103,9 @@
    * Normalize an Open Food Facts API v2 response into our internal shape.
    * Returns null when the product is unknown (status 0).
    */
+  var NUTRIMENT_KEYS = ["fat_100g", "carbohydrates_100g", "fiber_100g",
+                        "proteins_100g", "sugars_100g", "energy-kcal_100g"];
+
   function normalizeProduct(json) {
     if (!json || json.status === 0 || !json.product) return null;
     var p = json.product;
@@ -116,6 +119,16 @@
       sugars: num(n.sugars_100g),
       kcal: num(n["energy-kcal_100g"])
     };
+
+    // Crowdsourced records sometimes have ingredients but an EMPTY nutrition
+    // table (duplicate barcodes are a common culprit). Distinguish "no data at
+    // all" from a real all-zero label (water, diet soda): only the former
+    // should make the app warn instead of silently showing 0s.
+    var anyNutriment = NUTRIMENT_KEYS.some(function (k) {
+      var v = n[k];
+      var x = typeof v === "string" ? parseFloat(v) : v;
+      return typeof x === "number" && isFinite(x);
+    });
 
     var additives = (p.additives_tags || []).map(function (t) {
       return String(t).replace(/^en:/, "").toUpperCase();
@@ -132,8 +145,48 @@
       nova: p.nova_group || null,
       additives: additives,
       ingredientsText: p.ingredients_text || "",
-      flags: scanIngredients(p.ingredients_text || "")
+      flags: scanIngredients(p.ingredients_text || ""),
+      nutritionMissing: !anyNutriment
     };
+  }
+
+  /**
+   * Should the UI trust this product's macros? False means "warn and offer the
+   * correct-from-label form" -- the record carries no nutrition data. Products
+   * from before the nutritionMissing flag existed (old caches) fall back to a
+   * zero-macro heuristic.
+   */
+  function hasNutrition(p) {
+    if (!p || !p.per100) return false;
+    if (p.nutritionMissing !== undefined) return !p.nutritionMissing;
+    var m = p.per100;
+    return [m.fat, m.carb, m.protein, m.kcal].some(function (v) { return num(v) > 0; });
+  }
+
+  /**
+   * A corrected copy of a product, its per-100g block rebuilt from nutrition
+   * label values for one serving (the numbers printed on the package). kcal
+   * left blank falls back to the Atwater estimate. Returns null on a bad
+   * serving weight. The original object is not modified.
+   */
+  function productWithNutrition(p, servingGrams, label) {
+    var g = num(servingGrams);
+    if (!(g > 0)) return null;
+    var k = 100 / g;
+    label = label || {};
+    var fat = num(label.fat), carb = num(label.carb), fiber = num(label.fiber),
+        protein = num(label.protein), sugars = num(label.sugars);
+    var kcal = (label.kcal === "" || label.kcal === null || label.kcal === undefined)
+      ? (fat * 9 + Math.max(0, carb - fiber) * 4 + protein * 4)
+      : num(label.kcal);
+    return Object.assign({}, p, {
+      per100: { fat: fat * k, carb: carb * k, fiber: fiber * k,
+                protein: protein * k, sugars: sugars * k, kcal: kcal * k },
+      servingGrams: g,
+      servingSize: (p && p.servingSize) || (Math.round(g) + " g"),
+      nutritionMissing: false,
+      corrected: true
+    });
   }
 
   /** Net carbs = total carbohydrate - fiber (US label convention). */
@@ -643,6 +696,8 @@
     NOVA_LABELS: NOVA_LABELS,
     scanIngredients: scanIngredients,
     normalizeProduct: normalizeProduct,
+    hasNutrition: hasNutrition,
+    productWithNutrition: productWithNutrition,
     netCarbs: netCarbs,
     macrosForGrams: macrosForGrams,
     quickEntryMacros: quickEntryMacros,
