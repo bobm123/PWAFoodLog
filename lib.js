@@ -280,13 +280,17 @@
     var grams = num(ps.grams);
     if (grams <= 0) throw new Error("Analyzer JSON has no per-serving gram weight");
     var k = 100 / grams;
+    // "servings: 6" in the JSON names the portion "1/6 of recipe", which is
+    // how people think about a dish that serves six.
+    var servings = num(json.servings);
+    var portionName = servings >= 2 ? "1/" + Math.round(servings) + " of recipe" : "1 serving";
     return {
       id: "recipe:" + (json.title || "untitled").toLowerCase().replace(/[^a-z0-9]+/g, "-"),
       type: "recipe",
       name: json.title || "Untitled recipe",
       brand: "Custom recipe",
       servingGrams: grams,
-      servingLabel: "1 serving (" + Math.round(grams) + " g)",
+      servingLabel: portionName + " (" + Math.round(grams) + " g)",
       per100: {
         fat: num(ps.fat) * k,
         carb: num(ps.carb) * k,
@@ -345,6 +349,49 @@
       nova: null, additives: [], ingredientsText: "", flags: [],
       pending: true
     };
+  }
+
+  // --------------------------------------------------------------- portions
+  var UNICODE_FRACTIONS = {
+    "½": 1 / 2, "⅓": 1 / 3, "⅔": 2 / 3, "¼": 1 / 4,
+    "¾": 3 / 4, "⅕": 1 / 5, "⅛": 1 / 8, "⅜": 3 / 8,
+    "⅝": 5 / 8, "⅞": 7 / 8
+  };
+
+  /**
+   * How many portions? Accepts what people actually type: "2", "0.5", "1/2",
+   * "1 1/2", "1.25", and unicode fractions ("½", "1½").
+   * Returns 0 when unparseable or not positive.
+   */
+  function parseCount(s) {
+    if (typeof s === "number") return (isFinite(s) && s > 0) ? s : 0;
+    s = String(s === null || s === undefined ? "" : s).trim();
+    if (!s) return 0;
+    var m = s.match(/^(\d+)?\s*([½⅓⅔¼¾⅕⅛⅜⅝⅞])$/);
+    if (m) return (m[1] ? parseInt(m[1], 10) : 0) + UNICODE_FRACTIONS[m[2]];
+    m = s.match(/^(\d+)\s+(\d+)\s*\/\s*(\d+)$/);          // "1 1/2"
+    if (m) return Number(m[3]) > 0 ? Number(m[1]) + Number(m[2]) / Number(m[3]) : 0;
+    m = s.match(/^(\d+)\s*\/\s*(\d+)$/);                  // "3/4"
+    if (m) return Number(m[2]) > 0 ? Number(m[1]) / Number(m[2]) : 0;
+    var n = parseFloat(s);
+    return (isFinite(n) && n > 0 && /^[\d.]/.test(s)) ? n : 0;
+  }
+
+  /** Compact count for display: 2 -> "2", 0.5 -> "0.5", 1.3333 -> "1.33". */
+  function formatCount(n) {
+    n = num(n);
+    if (Math.abs(n - Math.round(n)) < 1e-9) return String(Math.round(n));
+    return String(Math.round(n * 100) / 100);
+  }
+
+  /** "2 × 1 egg" for diary rows. */
+  function portionDisplay(count, label) {
+    return formatCount(count) + " × " + label;
+  }
+
+  /** "1 egg (50 g)" -> "1 egg": the label without its gram parenthetical. */
+  function shortPortionLabel(label) {
+    return String(label || "").replace(/\s*\(\s*[\d.]+\s*g\s*\)\s*$/i, "").trim() || "serving";
   }
 
   // ------------------------------------------------------------------ meals
@@ -420,7 +467,8 @@
       seen[key] = true;
       out.push({
         name: e.name, brand: e.brand || "", code: e.code || "",
-        nova: e.nova || null, flags: e.flags || [], macros: e.macros
+        nova: e.nova || null, flags: e.flags || [], macros: e.macros,
+        portion: e.portion || null
       });
     }
     return out;
@@ -706,6 +754,10 @@
     recipeFromAnalyzerJson: recipeFromAnalyzerJson,
     foodFromProduct: foodFromProduct,
     pendingProductFood: pendingProductFood,
+    parseCount: parseCount,
+    formatCount: formatCount,
+    portionDisplay: portionDisplay,
+    shortPortionLabel: shortPortionLabel,
     barcodeVariants: barcodeVariants,
     MEALS: MEALS,
     MEAL_LABELS: MEAL_LABELS,

@@ -264,7 +264,9 @@
     var editing = editingEntryId === e.id;
     return '<div class="item">' +
       '<div class="top"><span class="nm">' + esc(e.name) + "</span>" +
-      '<span class="sub">' + fmt(m.grams, 0) + " g</span></div>" +
+      '<span class="sub">' +
+        (e.portion ? esc(L.portionDisplay(e.portion.count, e.portion.label)) + " &middot; " : "") +
+        fmt(m.grams, 0) + " g</span></div>" +
       (e.brand ? '<div class="sub">' + esc(e.brand) + "</div>" : "") +
       '<div class="macros">net carbs <b>' + fmt(m.netCarb, 1) + " g</b> &middot; fat <b>" +
         fmt(m.fat, 1) + " g</b> &middot; protein <b>" + fmt(m.protein, 1) +
@@ -326,7 +328,11 @@
       var e = entries.filter(function (x) { return x.id === id; })[0];
       if (!e) { editingEntryId = null; return renderToday(); }
       var scaled = L.scaleMacros(e.macros, g);
-      if (scaled) e.macros = scaled;      // bad grams -> keep old amounts
+      if (scaled) {
+        // A hand-edited gram amount invalidates the "2 × 1 egg" story.
+        if (Math.abs(scaled.grams - e.macros.grams) > 0.001) e.portion = null;
+        e.macros = scaled;                // bad grams -> keep old amounts
+      }
       e.meal = meal;
       return S.put("entries", e).then(function () {
         editingEntryId = null;
@@ -342,6 +348,7 @@
       if (!e) return;
       return addRawEntry(e.name, e.macros, {
         brand: e.brand, code: e.code, nova: e.nova, flags: e.flags,
+        portion: e.portion || null,
         meal: nowMeal()
       });
     });
@@ -351,6 +358,12 @@
   function renderProduct(p, stale) {
     currentProduct = p;
     var serving = p.servingGrams || 100;
+    var hasServ = Number(p.servingGrams) > 0;
+    // "1 tbsp (17 g)" for display; "1 tbsp" as the stored portion label.
+    var servFull = p.servingSize
+      ? L.shortPortionLabel(p.servingSize) + " (" + fmt(p.servingGrams, 0) + " g)"
+      : "1 serving (" + fmt(p.servingGrams, 0) + " g)";
+    var servShort = L.shortPortionLabel(p.servingSize || "1 serving");
     $("productCard").innerHTML =
       '<div class="card">' +
       (stale ? '<p class="stale">Saved copy - not refreshed from Open Food Facts.</p>' : "") +
@@ -386,23 +399,51 @@
             '<p class="status" id="fixStatus"></p>' +
           "</div>" +
         "</div>") +
-      '<div class="row" style="margin-top:.7rem">' +
-        '<input id="portion" type="number" step="any" value="' + serving + '" aria-label="Portion in grams">' +
+      '<div class="row portionrow" style="margin-top:.7rem">' +
+        '<input id="portionCount" inputmode="decimal" value="' + (hasServ ? "1" : serving) +
+          '" aria-label="How much">' +
+        '<select id="portionUnit" aria-label="Unit">' +
+          (hasServ ? '<option value="serving">' + esc(servFull) + "</option>" : "") +
+          '<option value="grams"' + (hasServ ? "" : " selected") + ">grams</option>" +
+        "</select>" +
         '<select id="portionMeal" aria-label="Meal">' + mealOptions(currentMeal || nowMeal()) + "</select>" +
       "</div>" +
+      '<p class="hint" id="portionPreview"></p>' +
       '<div class="row" style="margin-top:.5rem">' +
         '<button id="btnAddEntry" class="primary" style="flex:1">Add to ' +
           (viewDate === today() ? "today" : esc(viewDate)) + "</button>" +
         '<button id="btnSaveProduct" class="ghost" style="flex:1">Save product</button>' +
       "</div>" +
-      '<p class="hint">Portion in grams' + (p.servingSize ? " (label serving: " + esc(p.servingSize) + ")" : "") +
-        ". Save product keeps it in your Foods for quick re-logging.</p>" +
+      '<p class="hint">' +
+        (hasServ
+          ? "Label serving: <b>" + esc(servFull) + "</b>. Count takes fractions (1/2); switch the unit to grams to log a weighed amount."
+          : "Amount in grams; fractions like 1/2 work too.") +
+        " Save product keeps it in your Foods for quick re-logging.</p>" +
       "</div>";
 
+    function portionGrams() {
+      var count = L.parseCount($("portionCount").value);
+      var unit = $("portionUnit").value;
+      return { count: count, unit: unit, grams: unit === "serving" ? count * p.servingGrams : count };
+    }
+    function updatePreview() {
+      var sel = portionGrams();
+      var el = $("portionPreview");
+      if (!el) return;
+      if (!(sel.grams > 0)) { el.textContent = "Enter an amount to see its macros."; return; }
+      var mm = L.macrosForGrams(p.per100, sel.grams);
+      el.innerHTML = "= <b>" + fmt(sel.grams, 0) + " g</b> &middot; " + fmt(mm.netCarb, 1) +
+        " g net carbs &middot; " + fmt(mm.kcal, 0) + " kcal";
+    }
+    $("portionCount").addEventListener("input", updatePreview);
+    $("portionUnit").addEventListener("change", updatePreview);
+    updatePreview();
+
     $("btnAddEntry").addEventListener("click", function () {
-      var g = parseFloat($("portion").value);
-      if (!(g > 0)) return;
-      addEntry(p, g, $("portionMeal").value);
+      var sel = portionGrams();
+      if (!(sel.grams > 0)) return;
+      var portion = sel.unit === "serving" ? { label: servShort, count: sel.count } : null;
+      addEntry(p, sel.grams, $("portionMeal").value, portion);
     });
     $("btnSaveProduct").addEventListener("click", function () { saveProduct(p); });
     if (!L.hasNutrition(p)) {
@@ -478,7 +519,7 @@
     return S.put("entries", entry).then(renderToday);
   }
 
-  function addEntry(p, grams, meal) {
+  function addEntry(p, grams, meal, portion) {
     var entry = {
       date: viewDate,
       name: p.name,
@@ -487,6 +528,7 @@
       nova: p.nova || null,
       flags: p.flags || [],
       macros: L.macrosForGrams(p.per100, grams),
+      portion: portion || null,
       meal: meal || currentMeal || nowMeal(),
       loggedAt: new Date().toISOString()
     };
@@ -830,6 +872,8 @@
     var name = $("cfName").value.trim();
     var g = parseFloat($("cfGrams").value);
     var barcode = $("cfBarcode").value.trim();
+    // "1 egg", "1/2 cup", "1 medium" - names the portion the serving describes.
+    var portionName = ($("cfPortion") ? $("cfPortion").value : "").trim();
     if (!name || !(g > 0)) { alert("Give the food a name and a serving weight in grams."); return; }
     var fat = parseFloat($("cfFat").value) || 0,
         carb = parseFloat($("cfCarb").value) || 0,
@@ -839,7 +883,8 @@
     var food = {
       id: "food:" + name.toLowerCase().replace(/[^a-z0-9]+/g, "-") + ":" + Date.now(),
       type: "food", name: name, brand: "Custom", code: barcode || "",
-      servingGrams: g, servingLabel: "1 serving (" + fmt(g, 0) + " g)",
+      servingGrams: g,
+      servingLabel: (portionName || "1 serving") + " (" + fmt(g, 0) + " g)",
       per100: { fat: fat * k, carb: carb * k, fiber: fiber * k, protein: prot * k, sugars: 0,
                 kcal: (fat * 9 + Math.max(0, carb - fiber) * 4 + prot * 4) * k },
       nova: null, additives: [], ingredientsText: "", flags: []
@@ -855,8 +900,8 @@
       }));
     }
     Promise.all(jobs).then(function () {
-      ["cfName", "cfGrams", "cfFat", "cfCarb", "cfFiber", "cfProtein", "cfBarcode"]
-        .forEach(function (i) { $(i).value = ""; });
+      ["cfName", "cfGrams", "cfFat", "cfCarb", "cfFiber", "cfProtein", "cfBarcode", "cfPortion"]
+        .forEach(function (i) { if ($(i)) $(i).value = ""; });
       status($("foodStatus"), barcode
         ? "Saved. Scanning " + barcode + " will now find it, even offline."
         : "Saved.", "ok");
@@ -884,7 +929,8 @@
   function logFood(id) {
     S.getAll("foods").then(function (foods) {
       var f = foods.filter(function (x) { return x.id === id; })[0];
-      if (f) addEntry(f, f.servingGrams);
+      if (f) addEntry(f, f.servingGrams, null,
+        { label: L.shortPortionLabel(f.servingLabel), count: 1 });
     });
   }
 
@@ -1067,7 +1113,9 @@
         var m = f.macros;
         return '<div class="item">' +
           '<div class="top"><span class="nm">' + esc(f.name) + "</span>" +
-            '<span class="sub">' + fmt(m.grams, 0) + " g</span></div>" +
+            '<span class="sub">' +
+            (f.portion ? esc(L.portionDisplay(f.portion.count, f.portion.label)) + " &middot; " : "") +
+            fmt(m.grams, 0) + " g</span></div>" +
           '<div class="macros">net carbs <b>' + fmt(m.netCarb, 1) + " g</b> &middot; fat <b>" +
             fmt(m.fat, 1) + " g</b> &middot; protein <b>" + fmt(m.protein, 1) + " g</b></div>" +
           '<div class="acts"><button class="primary tiny" data-recent="' + i + '">Log</button></div>' +
@@ -1239,6 +1287,7 @@
         if (f) {
           addRawEntry(f.name, f.macros, {
             brand: f.brand, code: f.code, nova: f.nova, flags: f.flags,
+            portion: f.portion || null,
             meal: currentMeal || nowMeal()
           });
           closeSheet();

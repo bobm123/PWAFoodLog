@@ -181,5 +181,40 @@ const atw = L.productWithNutrition(a1dupe, 17, { kcal: "", fat: 0, carb: 3, fibe
 ok("blank kcal -> Atwater (3*4=12 per serving)", close(L.macrosForGrams(atw.per100, 17).kcal, 12, 0.05));
 ok("bad serving weight -> null", L.productWithNutrition(a1dupe, 0, { carb: 3 }) === null);
 
+console.log("\n-- parseCount: portions the way people type them --");
+ok("plain integer", L.parseCount("2") === 2);
+ok("decimal", L.parseCount("0.5") === 0.5);
+ok("simple fraction", close(L.parseCount("1/2"), 0.5));
+ok("mixed number", close(L.parseCount("1 1/2"), 1.5));
+ok("three quarters", close(L.parseCount("3/4"), 0.75));
+ok("unicode half", close(L.parseCount("½"), 0.5));
+ok("one-and-a-half unicode", close(L.parseCount("1½"), 1.5));
+ok("number passthrough", L.parseCount(2.5) === 2.5);
+ok("zero rejected", L.parseCount("0") === 0);
+ok("negative rejected", L.parseCount("-1") === 0);
+ok("garbage rejected", L.parseCount("a lot") === 0);
+ok("blank rejected", L.parseCount("") === 0 && L.parseCount(null) === 0);
+ok("divide-by-zero fraction rejected", L.parseCount("1/0") === 0);
+
+console.log("\n-- portion display + labels --");
+ok("2 x egg", L.portionDisplay(2, "1 egg") === "2 × 1 egg");
+ok("fractional count formats compactly", L.portionDisplay(0.5, "1/6 of recipe") === "0.5 × 1/6 of recipe");
+ok("thirds round to 2dp", L.formatCount(4 / 3) === "1.33");
+ok("strip gram parenthetical", L.shortPortionLabel("1 egg (50 g)") === "1 egg");
+ok("strip compact grams", L.shortPortionLabel("1 cup (170g)") === "1 cup");
+ok("label without grams unchanged", L.shortPortionLabel("1 tbsp") === "1 tbsp");
+ok("empty label falls back", L.shortPortionLabel("") === "serving");
+
+console.log("\n-- recipe import: servings -> '1/N of recipe' portion --");
+const shak = L.recipeFromAnalyzerJson({
+  title: "Huevos Shakshukos", servings: 6,
+  per_serving: { grams: 235, kcal: 174, fat: 9, carb: 12, fiber: 3, protein: 10 },
+  ingredients: [{ name: "eggs" }, { name: "refried beans" }]
+});
+ok("servings=6 -> 1/6 of recipe label", shak.servingLabel === "1/6 of recipe (235 g)", shak.servingLabel);
+ok("no servings -> plain serving label",
+   L.recipeFromAnalyzerJson({ title: "X", per_serving: { grams: 100, fat: 1, carb: 1, fiber: 0, protein: 1, kcal: 17 } })
+     .servingLabel === "1 serving (100 g)");
+
 console.log("\n" + (fail ? "FAILED " + fail : "ALL PASSED") + "  (" + pass + " assertions)\n");
 process.exit(fail ? 1 : 0);

@@ -79,6 +79,15 @@ const { spawn } = require("child_process");
   ok("seeded barcode renders a product", /Coca-Cola/i.test(await page.locator("#productCard").textContent()));
   ok("seeded barcode made ZERO network calls", offCalls === 0, "calls="+offCalls);
 
+  // ---- portion picker: serving named in details, fractions accepted ----
+  ok("serving shown in details", /20 fl oz \(591 g\)/.test(await page.locator("#productCard").textContent()),
+     (await page.locator("#productCard").textContent()).slice(0, 300));
+  await page.fill("#portionCount", "1/2");
+  await page.waitForTimeout(200);
+  ok("fraction count previews half a bottle (~296 g)",
+     /29[56] g/.test(await page.locator("#portionPreview").textContent()),
+     await page.locator("#portionPreview").textContent());
+
   // ---- Save Product: keep a scanned product in the frequent-foods list ----
   await page.click("#btnSaveProduct");
   await page.waitForTimeout(200);

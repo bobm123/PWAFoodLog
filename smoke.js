@@ -99,11 +99,20 @@ function ok(n, c, x) { if (c) { pass++; console.log("  [OK]   " + n); } else { f
   await page.waitForTimeout(300);
   ok("tapping a hit renders the product card", /Greek Yogurt/i.test(await page.locator("#productCard").textContent()));
   ok("product card has a meal select", await page.locator("#portionMeal").count() === 1);
+  // ---- portion × count: seeded Fage carries "1 cup (170g)" ----
+  ok("unit select offers the label serving",
+     /1 cup \(170 g\)/.test(await page.locator("#portionUnit").innerHTML()),
+     await page.locator("#portionUnit").innerHTML());
   await page.selectOption("#portionMeal", "lunch");
-  await page.fill("#portion", "150");
+  await page.fill("#portionCount", "2");
+  await page.waitForTimeout(200);
+  ok("live preview computes 2 servings = 340 g",
+     /340 g/.test(await page.locator("#portionPreview").textContent()),
+     await page.locator("#portionPreview").textContent());
   await page.click("#btnAddEntry");
   await page.waitForTimeout(300);
   ok("search result logged under Lunch", (await page.locator(".mealhead b").allTextContents()).includes("Lunch"));
+  ok("diary row reads 2 × 1 cup", /2 × 1 cup/.test(await page.locator("#entryList").textContent()));
 
   // ---- offline search falls back to local matches ----
   await page.click('.tab[data-tab="scan"]');

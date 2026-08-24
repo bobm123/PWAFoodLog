@@ -151,6 +151,10 @@ button:disabled{opacity:.5}
 .prod{display:flex;gap:.75rem;align-items:flex-start}
 .prod img{width:64px;height:64px;object-fit:contain;background:#fff;border-radius:8px;flex:none}
 
+/* portion picker on the product card: [count] [unit] [meal] */
+.portionrow>input{flex:0 1 4.5rem;min-width:3.5rem;text-align:center}
+.portionrow>select{flex:1 1 auto;width:auto;min-width:0}
+
 .budget{height:8px;background:#0d100f;border:1px solid var(--line);border-radius:999px;overflow:hidden;margin:.4rem 1rem 0}
 .budget>span{display:block;height:100%;background:var(--green)}
 .budget>span.over{background:var(--red)}

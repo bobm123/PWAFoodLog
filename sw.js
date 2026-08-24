@@ -5,7 +5,7 @@
  * Shell files are precached. Open Food Facts lookups are network-first with a
  * cache fallback, so a product you scanned before still resolves offline.
  */
-var CACHE = "foodlog-v7";
+var CACHE = "foodlog-v8";
 var SHELL = [
   "./", "./index.html", "./styles.css", "./lib.js", "./store.js", "./app.js",
   "./manifest.webmanifest", "./icon-192.png", "./icon-512.png",
