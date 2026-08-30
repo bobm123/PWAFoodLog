@@ -247,10 +247,29 @@ button:disabled{opacity:.5}
 .editrow input{max-width:6rem}
 .editrow select{width:auto}
 
-/* ---- search results ---- */
-#searchResults .item{cursor:pointer}
-#searchResults .item:active{background:#111614}
+/* ---- search results: compact one-line rows; tap opens the product page ---- */
+.srow{
+  display:flex;align-items:center;justify-content:space-between;gap:.6rem;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:.55rem .7rem;cursor:pointer;
+}
+.srow:active{background:#111614}
+.s-main{min-width:0;display:flex;flex-direction:column;gap:1px}
+.s-main .nm{font-weight:600;font-size:.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.s-brand{font-size:.7rem;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.s-side{display:flex;align-items:center;gap:.45rem;flex:none}
+.s-nc{font-size:.75rem;color:var(--fg);white-space:nowrap}
+.s-per{color:var(--dim);font-size:.65rem}
+.s-chev{color:var(--dim);font-size:1.1rem;line-height:1}
 .srcnote{font-size:.68rem;color:var(--dim);border:1px solid var(--line);border-radius:999px;padding:.1rem .4rem}
+.srcnote.schip{color:var(--green);border-color:#1d5433;background:#12351f}
+
+/* detail page: hide scanner + search cards, back button restores them */
+#panel-scan.detailview>.card{display:none}
+.backbtn{
+  background:none;border:0;color:var(--green);font-weight:600;font-size:.95rem;
+  padding:.15rem 0 .6rem;cursor:pointer;display:block;
+}
 
 /* ---- history charts ---- */
 .chartwrap{margin-top:.5rem}

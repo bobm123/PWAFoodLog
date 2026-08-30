@@ -61,14 +61,18 @@ const { spawn } = require("child_process");
   await page.fill("#searchQuery", "yogurt");
   await page.click("#btnSearch");
   await page.waitForTimeout(300);
-  ok("local search returns a seeded match", await page.locator("#searchResults .item").count() >= 1);
+  ok("local search returns a seeded match", await page.locator("#searchResults .srow").count() >= 1);
   ok("status says matches are on-device", /on this device/i.test(await page.locator("#searchStatus").textContent()));
   ok("online button is offered (online)", !(await page.locator("#btnSearchOnline").isHidden()));
 
   // pick a result -> product card, log it
-  await page.click('#searchResults .item');
+  await page.click('#searchResults .srow');
   await page.waitForTimeout(200);
   ok("search hit opens a product card", /net carbs/i.test(await page.locator("#productCard").textContent()));
+  ok("hit opens as its own page with a back button", await page.locator("#btnBackResults").count() === 1);
+  await page.click("#btnBackResults");
+  await page.waitForTimeout(200);
+  ok("back restores the search list and cards", !(await page.locator("#panel-scan > .card").first().isHidden()));
 
   // ---- local-first BARCODE: seeded code resolves with NO network ----
   let offCalls = 0;
@@ -98,6 +102,21 @@ const { spawn } = require("child_process");
       g.onsuccess = () => res(g.result ? { name: g.result.name, type: g.result.type } : null); g.onerror = () => res(null); };
   }));
   ok("saved product lands in Foods, keyed by barcode", savedProduct && savedProduct.type === "product", JSON.stringify(savedProduct));
+
+  // ---- saved foods surface in name search, marked and listed first ----
+  await page.fill("#searchQuery", "coca");
+  await page.click("#btnSearch");
+  await page.waitForTimeout(300);
+  ok("saved item listed first with a Saved chip",
+     /schip/.test(await page.locator("#searchResults .srow").first().innerHTML()),
+     await page.locator("#searchResults").innerHTML());
+  await page.click('#searchResults .srow');
+  await page.waitForTimeout(250);
+  ok("saved item opens the product page (no redundant Save button)",
+     /Coca-Cola/i.test(await page.locator("#productCard").textContent()) &&
+     await page.locator("#btnSaveProduct").count() === 0);
+  await page.click("#btnBackResults");
+  await page.waitForTimeout(200);
 
   // ---- zero-nutrition guard: a record with an EMPTY nutrition table ----
   await page.fill("#manualCode", "2222222222");
@@ -145,7 +164,7 @@ const { spawn } = require("child_process");
   await page.fill("#searchQuery", "peanut");
   await page.click("#btnSearch");
   await page.waitForTimeout(300);
-  ok("offline local search finds seeded item", await page.locator("#searchResults .item").count() >= 1);
+  ok("offline local search finds seeded item", await page.locator("#searchResults .srow").count() >= 1);
   ok("online button hidden while offline", await page.locator("#btnSearchOnline").isHidden());
 
   // ---- pending queue: scan unknown code while offline -> enqueued ----

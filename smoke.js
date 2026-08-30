@@ -92,12 +92,14 @@ function ok(n, c, x) { if (c) { pass++; console.log("  [OK]   " + n); } else { f
   // First search builds the in-memory index over the whole seed; with the real
   // 25k database that can take ~1s, so wait for results rather than a fixed beat.
   await page.waitForFunction(
-    () => document.querySelectorAll("#searchResults .item").length > 0,
+    () => document.querySelectorAll("#searchResults .srow").length > 0,
     null, { timeout: 8000 });
-  ok("local-first search returns a seeded greek yogurt", await page.locator("#searchResults .item").count() >= 1);
-  await page.click('#searchResults .item');
+  ok("local-first search returns a seeded greek yogurt", await page.locator("#searchResults .srow").count() >= 1);
+  await page.click('#searchResults .srow');
   await page.waitForTimeout(300);
   ok("tapping a hit renders the product card", /Greek Yogurt/i.test(await page.locator("#productCard").textContent()));
+  ok("detail view hides the scan/search cards", await page.locator("#panel-scan > .card").first().isHidden());
+  ok("back button present on the product page", await page.locator("#btnBackResults").count() === 1);
   ok("product card has a meal select", await page.locator("#portionMeal").count() === 1);
   // ---- portion × count: seeded Fage carries "1 cup (170g)" ----
   ok("unit select offers the label serving",
@@ -116,6 +118,7 @@ function ok(n, c, x) { if (c) { pass++; console.log("  [OK]   " + n); } else { f
 
   // ---- offline search falls back to local matches ----
   await page.click('.tab[data-tab="scan"]');
+  ok("cards restored after logging from the detail page", !(await page.locator("#panel-scan > .card").first().isHidden()));
   await page.context().setOffline(true);
   await page.evaluate(() => window.dispatchEvent(new Event("offline")));
   // navigator.onLine is read-only; emulate via context offline which updates it in Chromium.
@@ -124,7 +127,14 @@ function ok(n, c, x) { if (c) { pass++; console.log("  [OK]   " + n); } else { f
   await page.waitForTimeout(500);
   const st = await page.locator("#searchStatus").textContent();
   ok("offline search reads from the on-device database", /device/i.test(st), st);
-  ok("offline local search finds a seeded product", await page.locator("#searchResults .item").count() >= 1);
+  ok("offline local search finds a seeded product", await page.locator("#searchResults .srow").count() >= 1);
+  // list -> detail -> back keeps the results intact
+  await page.click('#searchResults .srow');
+  await page.waitForTimeout(250);
+  await page.click("#btnBackResults");
+  await page.waitForTimeout(250);
+  ok("back returns to the compact results list", await page.locator("#searchResults .srow").count() >= 1);
+  ok("search card visible again after back", !(await page.locator("#panel-scan > .card").first().isHidden()));
   ok("online button hidden while offline", await page.locator("#btnSearchOnline").isHidden());
   await page.context().setOffline(false);
   await page.evaluate(() => window.dispatchEvent(new Event("online")));

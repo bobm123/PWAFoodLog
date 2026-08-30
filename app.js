@@ -412,13 +412,14 @@
       '<div class="row" style="margin-top:.5rem">' +
         '<button id="btnAddEntry" class="primary" style="flex:1">Add to ' +
           (viewDate === today() ? "today" : esc(viewDate)) + "</button>" +
-        '<button id="btnSaveProduct" class="ghost" style="flex:1">Save product</button>' +
+        (p._saved ? "" : '<button id="btnSaveProduct" class="ghost" style="flex:1">Save product</button>') +
       "</div>" +
       '<p class="hint">' +
         (hasServ
           ? "Label serving: <b>" + esc(servFull) + "</b>. Count takes fractions (1/2); switch the unit to grams to log a weighed amount."
           : "Amount in grams; fractions like 1/2 work too.") +
-        " Save product keeps it in your Foods for quick re-logging.</p>" +
+        (p._saved ? " This is one of your saved foods." :
+          " Save product keeps it in your Foods for quick re-logging.") + "</p>" +
       "</div>";
 
     function portionGrams() {
@@ -445,7 +446,11 @@
       var portion = sel.unit === "serving" ? { label: servShort, count: sel.count } : null;
       addEntry(p, sel.grams, $("portionMeal").value, portion);
     });
-    $("btnSaveProduct").addEventListener("click", function () { saveProduct(p); });
+    if ($("btnSaveProduct")) {
+      $("btnSaveProduct").addEventListener("click", function () { saveProduct(p); });
+    }
+    // Opened from search results? Give the page its back button.
+    if (document.getElementById("panel-scan").classList.contains("detailview")) addBackBar();
     if (!L.hasNutrition(p)) {
       $("btnFixNutrition").addEventListener("click", function () {
         $("fixForm").classList.toggle("hidden");
@@ -533,7 +538,7 @@
       loggedAt: new Date().toISOString()
     };
     return S.put("entries", entry).then(function () {
-      $("productCard").innerHTML = "";
+      clearProductCard();
       status($("scanStatus"), "Added " + p.name + ".", "ok");
       showTab("today");
       return renderToday();
@@ -631,7 +636,7 @@
     ]).then(function () {
       status($("scanStatus"),
         "Saved barcode " + code + " to your Foods. Nutrition will fill in when you're back online.", "ok");
-      $("productCard").innerHTML = "";
+      clearProductCard();
       renderFoods();
       updateDbLine();
     });
@@ -674,18 +679,43 @@
   }
 
   // ---------------------------------------------------------------- search
+  /** Saved foods & recipes that match by name/brand -- "my stuff" first. */
+  function searchSavedFoods(q) {
+    q = String(q || "").trim().toLowerCase();
+    return S.getAll("foods").then(function (foods) {
+      return (foods || []).filter(function (f) {
+        return !f.pending &&
+          ((f.name || "").toLowerCase().indexOf(q) !== -1 ||
+           (f.brand || "").toLowerCase().indexOf(q) !== -1);
+      }).map(function (f) {
+        var copy = Object.assign({}, f);
+        copy._saved = true;
+        copy.image = copy.image || "";
+        copy.additives = f.additives || [];
+        copy.servingSize = f.servingLabel ? L.shortPortionLabel(f.servingLabel) : "";
+        return copy;
+      });
+    }, function () { return []; });
+  }
+
   function renderSearchResults(products) {
     lastSearchResults = products;
     $("searchResults").innerHTML = products.map(function (p, i) {
-      var nc = L.netCarbs(p.per100.carb, p.per100.fiber);
-      var note = p._online ? "Open Food Facts" : "";
-      return '<div class="item" data-result="' + i + '" role="button" tabindex="0">' +
-        '<div class="top"><span class="nm">' + esc(p.name) + "</span>" +
-          (note ? '<span class="srcnote">' + note + "</span>" : "") + "</div>" +
-        (p.brand ? '<div class="sub">' + esc(p.brand) + "</div>" : "") +
-        '<div class="macros">per 100 g: net carbs <b>' + fmt(nc, 1) + " g</b>" +
-          (p.per100.kcal ? " &middot; <b>" + fmt(p.per100.kcal, 0) + "</b> kcal" : "") + "</div>" +
-        '<div class="badges">' + novaBadge(p.nova) + flagBadges(p.flags) + "</div>" +
+      var side;
+      if (p._saved && p.servingGrams > 0) {
+        side = fmt(L.macrosForGrams(p.per100, p.servingGrams).netCarb, 1) +
+          " g net &middot; " + esc(L.shortPortionLabel(p.servingLabel));
+      } else {
+        side = fmt(L.netCarbs(p.per100.carb, p.per100.fiber), 1) +
+          ' g net<span class="s-per">/100g</span>';
+      }
+      var chip = p._saved ? '<span class="srcnote schip">Saved</span>'
+               : p._online ? '<span class="srcnote">OFF</span>' : "";
+      return '<div class="srow" data-result="' + i + '" role="button" tabindex="0">' +
+        '<div class="s-main"><span class="nm">' + esc(p.name) + "</span>" +
+          (p.brand ? '<span class="s-brand">' + esc(p.brand) + "</span>" : "") + "</div>" +
+        '<div class="s-side">' + chip + '<span class="s-nc">' + side + "</span>" +
+          '<span class="s-chev">&rsaquo;</span></div>' +
       "</div>";
     }).join("");
   }
@@ -695,9 +725,15 @@
     var q = $("searchQuery").value.trim();
     if (q.length < 2) { status($("searchStatus"), "Type at least two characters.", "err"); return; }
     status($("searchStatus"), "Searching your food database…");
-    localSearchProducts(q).then(function (local) {
-      renderSearchResults(local);
-      var n = local.length;
+    Promise.all([searchSavedFoods(q), localSearchProducts(q)]).then(function (r) {
+      var saved = r[0], local = r[1];
+      // A saved copy of a barcoded product outranks the database's row.
+      var savedCodes = {};
+      saved.forEach(function (f) { if (f.code) savedCodes[f.code] = true; });
+      local = local.filter(function (p) { return !(p.code && savedCodes[p.code]); });
+      var all = saved.concat(local);
+      renderSearchResults(all);
+      var n = all.length;
       status($("searchStatus"),
         n ? (n + (n >= 50 ? "+" : "") + " match" + (n === 1 ? "" : "es") + " on this device."
            + (navigator.onLine !== false ? " Not it? Search Open Food Facts below." : ""))
@@ -740,8 +776,34 @@
     // Cache a live Open Food Facts hit so it resolves instantly (and offline)
     // next time. Local/seed hits are already in the cache.
     if (p._online && p.code) S.putCachedProduct(p.code, p);
+    enterSearchDetail();
     renderProduct(p, false);
-    $("productCard").scrollIntoView({ behavior: "smooth", block: "start" });
+    window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });
+  }
+
+  // -------------------------------------------- search list <-> detail page
+  /**
+   * Tapping a search result opens the product as its own page: the scanner and
+   * search cards hide, a back button restores them. The results list is left
+   * untouched underneath, so back is instant and keeps scroll/query state.
+   */
+  function enterSearchDetail() {
+    document.getElementById("panel-scan").classList.add("detailview");
+  }
+  function exitSearchDetail() {
+    document.getElementById("panel-scan").classList.remove("detailview");
+    $("productCard").innerHTML = "";
+    currentProduct = null;
+  }
+  /** Clear the product card and, if it was open as a detail page, restore the list. */
+  function clearProductCard() {
+    exitSearchDetail();
+  }
+  function addBackBar() {
+    if ($("btnBackResults")) return;
+    $("productCard").insertAdjacentHTML("afterbegin",
+      '<button id="btnBackResults" class="backbtn">&#8592; Back to results</button>');
+    $("btnBackResults").addEventListener("click", exitSearchDetail);
   }
 
   // --------------------------------------------------------------- history
