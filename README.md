@@ -11,8 +11,8 @@ because the data source is free and the app has no backend.
 
 Open that link in **Safari** on your iPhone, then tap **Share → Add to Home
 Screen**. Launched from the home screen it runs full-screen, works offline, and
-IndexedDB gets much stronger persistence. (The link is live once GitHub Pages is
-enabled for the repo — see [Deploying](#deploying-required-for-camera-scanning).)
+IndexedDB gets much stronger persistence. The site is live on GitHub Pages — see
+[Deploying](#deploying-required-for-camera-scanning) to publish your own copy.
 
 ## Why this exists
 
