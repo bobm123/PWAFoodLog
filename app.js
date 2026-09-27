@@ -165,6 +165,40 @@
     el.className = "status" + (kind ? " " + kind : "");
   }
 
+  /**
+   * Confirmation you can't miss on a phone. The inline .status lines live at
+   * fixed spots in the page, so after a scan they sit above the fold -- this
+   * floats over the bottom of the viewport wherever you happen to be scrolled.
+   */
+  var toastTimer = null;
+  function toast(msg) {
+    var el = $("toast");
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.add("show");
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove("show"); }, 2500);
+  }
+
+  /**
+   * Turn the button the user just tapped into its own receipt. Reverts after a
+   * few seconds so a second save (e.g. re-saving after a nutrition fix) is
+   * still possible.
+   */
+  function markSaved(btn, label) {
+    if (!btn) return;
+    var was = btn.innerHTML, wasCls = btn.className;
+    btn.innerHTML = "✓ " + esc(label || "Saved");
+    btn.className = wasCls + " savedok";
+    btn.disabled = true;
+    setTimeout(function () {
+      if (!btn.isConnected) return;
+      btn.innerHTML = was;
+      btn.className = wasCls;
+      btn.disabled = false;
+    }, 3000);
+  }
+
   /** Persistent banner so the user is never surprised by a failed lookup. */
   function refreshOnlineBanner() {
     var off = navigator.onLine === false;
@@ -447,7 +481,7 @@
       addEntry(p, sel.grams, $("portionMeal").value, portion);
     });
     if ($("btnSaveProduct")) {
-      $("btnSaveProduct").addEventListener("click", function () { saveProduct(p); });
+      $("btnSaveProduct").addEventListener("click", function () { saveProduct(p, this); });
     }
     // Opened from search results? Give the page its back button.
     if (document.getElementById("panel-scan").classList.contains("detailview")) addBackBar();
@@ -501,13 +535,19 @@
   }
 
   /** Save a scanned/looked-up product to the frequently-purchased list. */
-  function saveProduct(p) {
+  function saveProduct(p, btn) {
     if (!p) return;
     return S.getAll("foods").then(function (foods) {
       var food = L.foodFromProduct(p);
       var existed = foods.some(function (f) { return f.id === food.id; });
       return S.put("foods", food).then(function () {
-        status($("scanStatus"), (existed ? "Updated " : "Saved ") + p.name + " in your Foods.", "ok");
+        var verb = existed ? "Updated " : "Saved ";
+        // #scanStatus sits above the product card, so on a phone it's often
+        // off-screen here -- the toast and the button itself do the telling.
+        status($("scanStatus"), verb + p.name + " in your Foods.", "ok");
+        toast(existed ? "Updated " + p.name + " in your Foods"
+                      : "Saved " + p.name + " to your Foods");
+        markSaved(btn, existed ? "Updated" : "Saved");
         renderFoods();
       });
     });
@@ -1051,6 +1091,10 @@
       status($("foodStatus"), barcode
         ? "Saved. Scanning " + barcode + " will now find it, even offline."
         : "Saved.", "ok");
+      // The form clears on save, which on its own reads like the entry was
+      // lost rather than stored -- say so explicitly.
+      toast("Saved " + name + " to your Foods");
+      markSaved($("btnAddFood"), "Saved");
       renderFoods();
     });
   }

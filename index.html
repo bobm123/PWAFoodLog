@@ -330,6 +330,9 @@
   <button id="btnCloseSheet" class="ghost" style="width:100%;margin-top:.75rem">Cancel</button>
 </div>
 
+<!-- Floating save/log confirmation; see toast() in app.js. -->
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
 <!--
   Scanner library: prefer the vendored local copy so the app has no CDN
   dependency. If vendor/html5-qrcode.min.js is absent we fall back to the CDN.
