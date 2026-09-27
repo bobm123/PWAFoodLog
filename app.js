@@ -1035,20 +1035,34 @@
       $("foodsEmpty").classList.toggle("hidden", foods.length > 0);
       $("foodList").innerHTML = foods.map(function (f) {
         var m = L.macrosForGrams(f.per100, f.servingGrams);
-        return '<div class="item">' +
-          '<div class="top"><span class="nm">' + esc(f.name) +
-            (f.pending ? ' <span class="srcnote">awaiting nutrition</span>' : "") + "</span>" +
-            '<span class="sub">' + esc(f.servingLabel || fmt(f.servingGrams, 0) + " g") + "</span></div>" +
+        // Three shapes: awaiting a fill-in, known-missing from OFF, or normal.
+        var tag = f.pending ? ' <span class="srcnote">awaiting nutrition</span>'
+                : f.notFound ? ' <span class="srcnote nf">not in Open Food Facts</span>'
+                : "";
+        var body = f.pending
+          ? '<div class="macros">Barcode ' + esc(f.code) + " saved. Tap <b>Fetch details</b> to look it up now.</div>"
+          : f.notFound
+          ? '<div class="macros">Barcode ' + esc(f.code) +
+            " isn't in Open Food Facts. Type the label numbers to make it usable.</div>"
+          : '<div class="macros">per serving: net carbs <b>' + fmt(m.netCarb, 1) +
+            " g</b> &middot; fat <b>" + fmt(m.fat, 1) + " g</b> &middot; protein <b>" +
+            fmt(m.protein, 1) + " g</b></div>";
+        var acts =
           (f.pending
-            ? '<div class="macros">Barcode ' + esc(f.code) + " saved. Nutrition fills in when you're back online.</div>"
-            : '<div class="macros">per serving: net carbs <b>' + fmt(m.netCarb, 1) +
-              " g</b> &middot; fat <b>" + fmt(m.fat, 1) + " g</b> &middot; protein <b>" +
-              fmt(m.protein, 1) + " g</b></div>") +
+            ? '<button class="primary tiny" data-fetchfood="' + esc(f.id) + '">Fetch details</button>'
+            : "") +
+          (f.pending || f.notFound
+            ? '<button class="' + (f.notFound ? "primary" : "ghost") + ' tiny" data-byhand="' +
+              esc(f.code) + '">Enter by hand</button>'
+            : '<button class="primary tiny" data-log="' + esc(f.id) + '">Log a serving</button>') +
+          '<button class="ghost tiny" data-delfood="' + esc(f.id) + '">Delete</button>';
+
+        return '<div class="item">' +
+          '<div class="top"><span class="nm">' + esc(f.name) + tag + "</span>" +
+            '<span class="sub">' + esc(f.servingLabel || fmt(f.servingGrams, 0) + " g") + "</span></div>" +
+          body +
           '<div class="badges">' + novaBadge(f.nova) + flagBadges(f.flags) + "</div>" +
-          '<div class="acts">' +
-            (f.pending ? "" : '<button class="primary tiny" data-log="' + esc(f.id) + '">Log a serving</button>') +
-            '<button class="ghost tiny" data-delfood="' + esc(f.id) + '">Delete</button>' +
-          "</div>" +
+          '<div class="acts">' + acts + "</div>" +
         "</div>";
       }).join("");
     });
@@ -1139,9 +1153,11 @@
   function reconcilePending() {
     if (reconciling || navigator.onLine === false) return Promise.resolve(0);
     reconciling = true;
-    return S.getAllPending().then(function (list) {
+    return adoptOrphanedPlaceholders().then(function () {
+      return S.getAllPending();
+    }).then(function (list) {
       list = (list || []).slice(0, RECONCILE_MAX);
-      var filled = 0, i = 0;
+      var filled = 0, marked = 0, i = 0;
       function step() {
         if (i >= list.length) return Promise.resolve();
         if (navigator.onLine === false) return Promise.resolve();
@@ -1154,23 +1170,125 @@
               return S.removePending(row.code);
             });
           }
-          if (r.error === L.ERR.NOT_FOUND) return S.removePending(row.code);
+          // Unknown to OFF: retrying won't help, so drop it from the queue --
+          // but mark the placeholder, or it sits on "awaiting nutrition"
+          // forever with nothing left to fill it in.
+          if (r.error === L.ERR.NOT_FOUND) {
+            marked++;
+            return markNotFound(row.code).then(function () { return S.removePending(row.code); });
+          }
           return S.bumpPending(row.code);       // still unreachable; try later
         }).then(function () {
           return new Promise(function (res) { setTimeout(res, RECONCILE_GAP_MS); });
         }).then(step);
       }
-      return step().then(function () { return filled; });
-    }).then(function (filled) {
+      return step().then(function () { return { filled: filled, marked: marked }; });
+    }).then(function (res) {
+      var filled = res.filled;
       reconciling = false;
       if (filled) {
         status($("scanStatus"),
           filled + " scanned item" + (filled === 1 ? "" : "s") + " filled in from Open Food Facts.", "ok");
-        renderFoods();   // saved placeholders may now have real nutrition
       }
+      // Redraw for either outcome: rows that filled in, and rows now marked
+      // as unknown to OFF.
+      if (filled || res.marked) renderFoods();
       updateDbLine();
       return filled;
     }, function () { reconciling = false; return 0; });
+  }
+
+  /**
+   * Re-queue "awaiting" foods that have no pending row left. Earlier builds
+   * dropped the queue entry without clearing the placeholder, which stranded
+   * the food with nothing able to fill it in. Cheap and idempotent: addPending
+   * keeps an existing row untouched.
+   */
+  function adoptOrphanedPlaceholders() {
+    return Promise.all([S.getAll("foods"), S.getAllPending()]).then(function (r) {
+      var queued = {};
+      (r[1] || []).forEach(function (row) { queued[String(row.code)] = true; });
+      var orphans = (r[0] || []).filter(function (f) {
+        return f.pending && f.code && !queued[String(f.code)];
+      });
+      return Promise.all(orphans.map(function (f) { return S.addPending(f.code, f.name); }));
+    }, function () { return null; });
+  }
+
+  /**
+   * Flag a placeholder whose barcode Open Food Facts doesn't know. It stays in
+   * Foods (the barcode is still worth keeping) but stops claiming a fill-in is
+   * coming, and offers manual entry instead.
+   */
+  function markNotFound(code) {
+    return markNotFoundById("product:" + String(code));
+  }
+
+  /** Same, for a row whose id we already know. */
+  function markNotFoundById(id) {
+    return S.getAll("foods").then(function (foods) {
+      var f = foods.filter(function (x) { return x.id === id; })[0];
+      if (!f || !f.pending) return null;
+      f.pending = false;
+      f.notFound = true;
+      return S.put("foods", f);
+    }, function () { return null; });
+  }
+
+  /**
+   * Fetch one awaiting barcode on demand. The automatic reconciler only runs
+   * at startup and on the browser's "online" event, which never fires when a
+   * lookup merely timed out on a weak signal -- so this is the manual way out.
+   * Works even for a placeholder that's no longer queued.
+   */
+  function fetchPendingFood(id) {
+    if (navigator.onLine === false) {
+      toast("Still offline - can't fetch details yet");
+      return Promise.resolve();
+    }
+    var btn = document.querySelector('[data-fetchfood="' + id + '"]');
+    if (btn) { btn.disabled = true; btn.textContent = "Fetching…"; }
+
+    // Read the barcode off the stored food rather than parsing it out of the
+    // id: the two usually match, but a food written by an older build (or an
+    // import) can carry a different id, and guessing wrong silently "succeeds"
+    // against the wrong record while this row stays stuck.
+    return S.getAll("foods").then(function (foods) {
+      var food = foods.filter(function (f) { return f.id === id; })[0];
+      var code = food && food.code ? String(food.code) : String(id).replace(/^product:/, "");
+
+      return L.lookupProduct(lookupDeps, code).then(function (r) {
+        if (r.product && r.source === "network") {
+          searchIndex = null;                   // new product joins search
+          // Fill in THIS row, by its own id, then clean up any duplicate the
+          // canonical-id path may also have written.
+          var filled = L.foodFromProduct(r.product);
+          filled.id = id;
+          return S.put("foods", filled)
+            .then(function () { return fillSavedProduct(r.product); })
+            .then(function () { return S.removePending(code); })
+            .then(function () {
+              toast("Filled in " + r.product.name);
+              renderFoods();
+              updateDbLine();
+            });
+        }
+        if (r.error === L.ERR.NOT_FOUND) {
+          return markNotFoundById(id)
+            .then(function () { return S.removePending(code); })
+            .then(function () {
+              toast("Open Food Facts doesn't have this barcode");
+              renderFoods();
+              updateDbLine();
+            });
+        }
+        toast("Couldn't reach Open Food Facts - try again");
+        return S.bumpPending(code).then(renderFoods);
+      });
+    }).catch(function () {
+      toast("Lookup failed - try again");
+      return renderFoods();
+    });
   }
 
   /** If a resolved product was saved as a pending placeholder, fill it in. */
@@ -1388,6 +1506,9 @@
     $("fabAdd").classList.toggle("hidden", name !== "today");
     if (name !== "scan" && scanner) stopScan();
     if (name === "history") renderHistory();
+    // Opening Foods is the moment the user looks at awaiting rows -- a good
+    // time to try filling them in.
+    if (name === "foods") reconcilePending();
   }
 
   // ------------------------------------------------------------------ init
@@ -1464,6 +1585,16 @@
       if (!b) return;
       if (b.dataset.del) S.del("entries", Number(b.dataset.del)).then(renderToday);
       else if (b.dataset.delfood) S.del("foods", b.dataset.delfood).then(renderFoods);
+      else if (b.dataset.fetchfood) fetchPendingFood(b.dataset.fetchfood);
+      else if (b.dataset.byhand) {
+        // Prefill the by-hand form with the barcode so the saved food takes
+        // over that code and future scans resolve offline.
+        showTab("foods");
+        $("cfBarcode").value = b.dataset.byhand;
+        $("cfName").value = "";
+        $("cfName").focus();
+        $("cfName").scrollIntoView({ block: "center" });
+      }
       else if (b.dataset.log) logFood(b.dataset.log);
       else if (b.dataset.sheetlog) { closeSheet(); logFood(b.dataset.sheetlog); }
       else if (b.dataset.edit) startEditEntry(Number(b.dataset.edit));
@@ -1491,6 +1622,13 @@
     });
     window.addEventListener("offline", refreshOnlineBanner);
     refreshOnlineBanner();
+
+    // A resumed PWA never re-runs init(), and a lookup that merely timed out
+    // on a weak signal never produces an "online" event -- so without this,
+    // queued scans can sit unfilled indefinitely.
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible") reconcilePending();
+    });
 
     S.requestPersistence();
     loadSettings().then(renderToday).then(renderFoods);

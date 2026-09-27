@@ -312,3 +312,6 @@ button:disabled{opacity:.5}
 button.savedok{
   background:var(--green);color:#07120b;border-color:var(--green);opacity:1;
 }
+
+/* a barcode Open Food Facts doesn't know: informational, not an error */
+.srcnote.nf{color:var(--amber)}
