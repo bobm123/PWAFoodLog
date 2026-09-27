@@ -287,3 +287,10 @@ button:disabled{opacity:.5}
   margin:.85rem 0 .4rem;
 }
 #recentList .item{padding:.5rem .7rem}
+
+/* ---- scanner zoom control (only shown if the camera supports zoom) ---- */
+.zoomrow{display:flex;align-items:center;gap:.6rem;margin:0 0 .6rem}
+.zoomrow label{font-size:.8rem;color:var(--dim)}
+.zoomrow input[type=range]{flex:1;accent-color:var(--green);height:1.6rem}
+.zoomval{font-size:.8rem;font-variant-numeric:tabular-nums;min-width:2.4rem;text-align:right}
+.zoomrow.hidden{display:none !important}

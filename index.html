@@ -84,6 +84,12 @@
   <section id="panel-scan" class="panel">
     <div class="card">
       <div id="reader" class="reader hidden"></div>
+      <!-- Shown only when the camera reports a zoom capability; see setupZoom(). -->
+      <div id="zoomRow" class="zoomrow hidden">
+        <label for="zoomRange">Zoom</label>
+        <input id="zoomRange" type="range" min="1" max="4" step="0.1" value="1">
+        <span id="zoomVal" class="zoomval">1&times;</span>
+      </div>
       <div class="row">
         <button id="btnScan" class="primary">Start camera scan</button>
         <button id="btnStopScan" class="ghost hidden">Stop</button>

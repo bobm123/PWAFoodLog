@@ -660,16 +660,100 @@
         Html5QrcodeSupportedFormats.CODE_128
       ]
     });
-    scanner.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 260, height: 160 } },
+    // Asking for 1080p steers phones toward the main rear lens instead of the
+    // ultra-wide, whose long minimum focus distance is why close-up barcodes
+    // refused to lock. More pixels also let the decoder read a small barcode
+    // from farther back. Both are "ideal", so a camera that can't do it still
+    // starts.
+    scanner.start(
+      { facingMode: "environment" },
+      {
+        fps: 10,
+        qrbox: { width: 260, height: 160 },
+        videoConstraints: {
+          facingMode: "environment",
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        }
+      },
       function (text) { stopScan(); lookup(text); },
       function () {}
-    ).catch(function (e) {
+    ).then(tuneCamera).catch(function (e) {
       status($("scanStatus"), "Camera unavailable (" + e + "). Use manual entry.", "err");
       stopScan();
     });
   }
 
+  /**
+   * Tune the live camera track once the stream is up: continuous autofocus,
+   * and a little zoom. Android Chrome honours both; iOS Safari ignores
+   * focusMode and focuses on its own. All best-effort -- the scanner is
+   * already running, so a device without these capabilities keeps the
+   * defaults.
+   */
+  function tuneCamera() {
+    var track;
+    try {
+      track = $("reader").querySelector("video").srcObject.getVideoTracks()[0];
+    } catch (e) { return; }                      // no track yet -- nothing to tune
+    if (!track || !track.getCapabilities) return;
+
+    var caps;
+    try { caps = track.getCapabilities() || {}; } catch (e) { return; }
+
+    if (caps.focusMode && caps.focusMode.indexOf("continuous") !== -1) {
+      track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(function () {});
+    }
+    setupZoom(track, caps.zoom);
+  }
+
+  /**
+   * Zoom helps twice over: it crops toward the barcode so it fills more of the
+   * frame, and on phones that switch lenses to do it, it moves off the
+   * ultra-wide -- whose long minimum focus distance is what stopped close-up
+   * barcodes focusing at all.
+   *
+   * The right amount is device- and arm's-length-specific, so the slider is
+   * the real fix; the default is only a starting point. Remembered between
+   * scans so it survives the next trip to the store.
+   */
+  function setupZoom(track, zoomCap) {
+    var row = $("zoomRow");
+    if (!row) return;
+    if (!zoomCap || !(zoomCap.max > zoomCap.min)) {
+      row.classList.add("hidden");               // camera can't zoom -- hide the control
+      return;
+    }
+    var slider = $("zoomRange");
+    slider.min = zoomCap.min;
+    slider.max = zoomCap.max;
+    slider.step = zoomCap.step || 0.1;
+
+    function apply(z) {
+      z = Math.min(zoomCap.max, Math.max(zoomCap.min, Number(z)));
+      slider.value = z;
+      $("zoomVal").textContent = (Math.round(z * 10) / 10) + "×";
+      track.applyConstraints({ advanced: [{ zoom: z }] }).catch(function () {});
+      return z;
+    }
+
+    S.getSetting("scanZoom", null).then(function (saved) {
+      // A modest default: enough to crop in and nudge lens selection, but not
+      // so tight that the barcode is hard to find in the frame.
+      var start = (saved !== null && saved !== "" && isFinite(saved))
+        ? Number(saved)
+        : Math.min(zoomCap.max, zoomCap.min + (zoomCap.max - zoomCap.min) * 0.25);
+      apply(start);
+      row.classList.remove("hidden");
+    });
+
+    slider.oninput = function () { apply(this.value); };
+    // Persist only on release, so dragging isn't a write per frame.
+    slider.onchange = function () { S.setSetting("scanZoom", apply(this.value)); };
+  }
+
   function stopScan() {
+    if ($("zoomRow")) $("zoomRow").classList.add("hidden");
     $("btnScan").classList.remove("hidden");
     $("btnStopScan").classList.add("hidden");
     $("reader").classList.add("hidden");
