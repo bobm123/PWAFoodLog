@@ -5,7 +5,10 @@
  * Shell files are precached. Open Food Facts lookups are network-first with a
  * cache fallback, so a product you scanned before still resolves offline.
  */
-var CACHE = "foodlog-v9";
+// The cache name comes from the app version in lib.js, so bumping
+// APP_VERSION there retires the old shell cache on every installed copy.
+importScripts("lib.js");
+var CACHE = "foodlog-" + self.FoodLib.APP_VERSION;
 var SHELL = [
   "./", "./index.html", "./styles.css", "./lib.js", "./store.js", "./app.js",
   "./manifest.webmanifest", "./icon-192.png", "./icon-512.png",

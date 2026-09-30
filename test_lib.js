@@ -216,5 +216,8 @@ ok("no servings -> plain serving label",
    L.recipeFromAnalyzerJson({ title: "X", per_serving: { grams: 100, fat: 1, carb: 1, fiber: 0, protein: 1, kcal: 17 } })
      .servingLabel === "1 serving (100 g)");
 
+console.log("\n-- app version --");
+ok("APP_VERSION is semver", /^\d+\.\d+\.\d+$/.test(L.APP_VERSION), L.APP_VERSION);
+
 console.log("\n" + (fail ? "FAILED " + fail : "ALL PASSED") + "  (" + pass + " assertions)\n");
 process.exit(fail ? 1 : 0);

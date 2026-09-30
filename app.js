@@ -1315,8 +1315,18 @@
       if (pending) parts.push(pending + " scan" + (pending === 1 ? "" : "s") + " waiting to be filled in when online");
       el.innerHTML = parts.join(". ") + ".";
     });
+    updateAbout();
   }
   function refreshSeedLine() { updateDbLine(); }
+
+  // ------------------------------------------------------------------ about
+  function updateAbout() {
+    var v = $("appVersion");
+    if (v) v.textContent = L.APP_VERSION;
+    var s = $("aboutSeed");
+    if (s) s.textContent = seedInfo && seedInfo.version
+      ? "Food database: seed " + seedInfo.version + "." : "";
+  }
 
   // -------------------------------------------------------------- settings
   // Each target is a settings key; blank means "no goal, just track it".
@@ -1631,6 +1641,7 @@
     });
 
     S.requestPersistence();
+    updateAbout();
     loadSettings().then(renderToday).then(renderFoods);
 
     // Load the bundled food database, then reconcile any pending scans and
