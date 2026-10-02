@@ -29,7 +29,13 @@
     var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, LOOKUP_TIMEOUT_MS);
     return fetch(url, ctrl ? { signal: ctrl.signal } : undefined)
       .then(function (r) {
-        if (!r.ok) throw new Error("HTTP " + r.status);
+        if (!r.ok) {
+          var e = new Error("HTTP " + r.status);
+          // Open Food Facts answers 404 for a barcode it doesn't have. Flag it
+          // so lookupProduct can tell "unknown product" from "no connection".
+          if (r.status === 404) e.notFound = true;
+          throw e;
+        }
         return r.json();
       })
       .then(
@@ -1030,11 +1036,49 @@
   }
 
   // ---------------------------------------------------------------- foods
+  // Which food rows are expanded. Kept outside the render so a redraw (after
+  // logging, fetching, deleting) doesn't collapse what the user opened.
+  var expandedFoods = {};
+
+  function toggleFoodDetail(id) {
+    if (expandedFoods[id]) delete expandedFoods[id];
+    else expandedFoods[id] = true;
+    renderFoods();
+  }
+
+  /** The extra rows revealed when a food card is expanded. */
+  function foodDetailRows(f) {
+    var m = L.macrosForGrams(f.per100, f.servingGrams);
+    var rows = [];
+    function row(label, value) {
+      rows.push('<div class="drow"><span class="dk">' + label +
+                '</span><span class="dv">' + value + "</span></div>");
+    }
+    if (m.kcal !== null && m.kcal !== undefined) row("Calories", fmt(m.kcal, 0) + " kcal");
+    row("Total carbs", fmt(m.carb, 1) + " g");
+    row("Fiber", fmt(m.fiber, 1) + " g");
+    row("Net carbs", "<b>" + fmt(m.netCarb, 1) + " g</b>");
+    row("Fat", fmt(m.fat, 1) + " g");
+    row("Protein", fmt(m.protein, 1) + " g");
+    row("Serving", esc(f.servingLabel || fmt(f.servingGrams, 0) + " g"));
+    if (f.brand) row("Brand", esc(f.brand));
+    if (f.code) row("Barcode", esc(f.code));
+    var ing = (f.ingredientsText || "").trim();
+    if (ing) {
+      rows.push('<div class="ding"><span class="dk">Ingredients</span>' +
+                "<p>" + esc(ing) + "</p></div>");
+    }
+    return '<div class="fdetail">' + rows.join("") + "</div>";
+  }
+
   function renderFoods() {
     return S.getAll("foods").then(function (foods) {
       $("foodsEmpty").classList.toggle("hidden", foods.length > 0);
       $("foodList").innerHTML = foods.map(function (f) {
         var m = L.macrosForGrams(f.per100, f.servingGrams);
+        var open = !!expandedFoods[f.id];
+        // A row with real nutrition is worth opening; a stub has nothing to show.
+        var expandable = !f.pending && !f.notFound;
         // Three shapes: awaiting a fill-in, known-missing from OFF, or normal.
         var tag = f.pending ? ' <span class="srcnote">awaiting nutrition</span>'
                 : f.notFound ? ' <span class="srcnote nf">not in Open Food Facts</span>'
@@ -1057,10 +1101,26 @@
             : '<button class="primary tiny" data-log="' + esc(f.id) + '">Log a serving</button>') +
           '<button class="ghost tiny" data-delfood="' + esc(f.id) + '">Delete</button>';
 
-        return '<div class="item">' +
-          '<div class="top"><span class="nm">' + esc(f.name) + tag + "</span>" +
-            '<span class="sub">' + esc(f.servingLabel || fmt(f.servingGrams, 0) + " g") + "</span></div>" +
-          body +
+        // Open Food Facts hosts the photo, so it just won't paint when
+        // offline; a delegated error handler hides the box rather than
+        // leaving a broken-image icon in the list.
+        var thumb = f.image
+          ? '<img class="fthumb" src="' + esc(f.image) + '" alt="" loading="lazy">'
+          : "";
+
+        return '<div class="item' + (open ? " open" : "") + '">' +
+          '<div class="fhead"' +
+            (expandable ? ' data-expand="' + esc(f.id) + '" role="button" tabindex="0"' +
+                          ' aria-expanded="' + (open ? "true" : "false") + '"' : "") + ">" +
+            thumb +
+            '<div class="fmain">' +
+              '<div class="top"><span class="nm">' + esc(f.name) + tag + "</span>" +
+                '<span class="sub">' + esc(f.servingLabel || fmt(f.servingGrams, 0) + " g") + "</span></div>" +
+              body +
+            "</div>" +
+            (expandable ? '<span class="fchev">' + (open ? "&and;" : "&or;") + "</span>" : "") +
+          "</div>" +
+          (open ? foodDetailRows(f) : "") +
           '<div class="badges">' + novaBadge(f.nova) + flagBadges(f.flags) + "</div>" +
           '<div class="acts">' + acts + "</div>" +
         "</div>";
@@ -1258,7 +1318,11 @@
       var code = food && food.code ? String(food.code) : String(id).replace(/^product:/, "");
 
       return L.lookupProduct(lookupDeps, code).then(function (r) {
-        if (r.product && r.source === "network") {
+        // Any real product will do. Insisting on source === "network" meant a
+        // product served from the device cache (what lookupProduct falls back
+        // to when the request fails) was thrown away, leaving the row stuck
+        // with a "couldn't reach Open Food Facts" toast over usable data.
+        if (r.product) {
           searchIndex = null;                   // new product joins search
           // Fill in THIS row, by its own id, then clean up any duplicate the
           // canonical-id path may also have written.
@@ -1590,7 +1654,27 @@
     $("fileImport").addEventListener("change", function (e) { if (e.target.files[0]) doImport(e.target.files[0]); });
 
     // delegated row actions
+    // Hide a product photo that fails to load (offline, or OFF dropped it)
+    // instead of showing a broken-image icon. Capture phase: error doesn't bubble.
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      var head = e.target.closest && e.target.closest("[data-expand]");
+      if (!head) return;
+      e.preventDefault();
+      toggleFoodDetail(head.dataset.expand);
+    });
+
+    document.addEventListener("error", function (e) {
+      var t = e.target;
+      if (t && t.tagName === "IMG" && t.classList.contains("fthumb")) t.style.display = "none";
+    }, true);
+
     document.addEventListener("click", function (e) {
+      var head = e.target.closest && e.target.closest("[data-expand]");
+      if (head && !e.target.closest("button")) {
+        toggleFoodDetail(head.dataset.expand);
+        return;
+      }
       var b = e.target.closest && e.target.closest("button");
       if (!b) return;
       if (b.dataset.del) S.del("entries", Number(b.dataset.del)).then(renderToday);

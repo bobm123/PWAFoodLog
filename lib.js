@@ -338,7 +338,11 @@
       nova: p.nova || null,
       additives: p.additives || [],
       ingredientsText: p.ingredientsText || "",
-      flags: p.flags || []
+      flags: p.flags || [],
+      // Open Food Facts hosts the photo; keeping the URL lets a saved food
+      // show the same thumbnail the scan did. It needs a connection to load,
+      // so every use has to tolerate it not appearing.
+      image: p.image || ""
     };
   }
 
@@ -676,6 +680,16 @@
   }
 
   /**
+   * Did the server answer "no such product"? Open Food Facts replies 404 for
+   * an unknown barcode, which the fetch helper surfaces as a thrown error --
+   * without this, a perfectly clear "not in the database" looks identical to
+   * a dropped connection, and the UI tells the user to check their signal.
+   */
+  function isNotFoundError(err) {
+    return !!err && err.notFound === true;
+  }
+
+  /**
    * deps = {
    *   fetchJson(url) -> Promise<json>   (rejects on timeout/network)
    *   getCached(code) -> Promise<product|null>
@@ -734,6 +748,10 @@
         // A cache write failure must never sink a successful lookup.
         return deps.putCached(v, p).then(done, done);
       }, function (err) {
+        // 404 == the server was reached and this barcode isn't in it. Treat it
+        // exactly like a status-0 body: move on to the next variant, and if
+        // none match, report NOT_FOUND rather than a network failure.
+        if (isNotFoundError(err)) return attempt();
         return fromCache(isTimeoutError(err) ? ERR.TIMEOUT : ERR.NETWORK);
       });
     }
@@ -745,6 +763,7 @@
     ERR: ERR,
     ERR_MESSAGE: ERR_MESSAGE,
     isTimeoutError: isTimeoutError,
+    isNotFoundError: isNotFoundError,
     lookupProduct: lookupProduct,
     GI_WATCHLIST: GI_WATCHLIST,
     NOVA_LABELS: NOVA_LABELS,

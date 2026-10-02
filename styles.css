@@ -315,3 +315,23 @@ button.savedok{
 
 /* a barcode Open Food Facts doesn't know: informational, not an error */
 .srcnote.nf{color:var(--amber)}
+
+/* ---- food card: thumbnail + tap-to-expand detail ---- */
+.fhead{display:flex;align-items:flex-start;gap:.6rem}
+.fhead[data-expand]{cursor:pointer}
+.fmain{flex:1;min-width:0}
+.fthumb{
+  width:48px;height:48px;object-fit:contain;background:#fff;
+  border-radius:8px;flex:none;margin-top:.1rem;
+}
+.fchev{color:var(--dim);font-size:1rem;line-height:1;flex:none;padding:.15rem .1rem}
+
+.fdetail{
+  margin:.6rem 0 .1rem;padding-top:.55rem;border-top:1px solid var(--line);
+  display:flex;flex-direction:column;gap:.3rem;
+}
+.drow{display:flex;justify-content:space-between;gap:.75rem;font-size:.82rem}
+.dk{color:var(--dim)}
+.dv{font-variant-numeric:tabular-nums;text-align:right}
+.ding{margin-top:.35rem;font-size:.82rem}
+.ding p{margin:.2rem 0 0;color:var(--dim);line-height:1.35}

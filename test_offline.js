@@ -53,6 +53,30 @@ t("online + genuinely unknown barcode -> not-found", async () => {
   ok("has actionable message", /enter it by hand/i.test(r.message), r.message);
 });
 
+// Open Food Facts answers 404 (not a 200 with status:0) for a barcode it
+// doesn't have. Before this was handled, the thrown HTTP error looked like a
+// dropped connection, so unknown store-brand barcodes reported "couldn't reach
+// Open Food Facts" forever instead of "not in the database".
+t("online + 404 from the API -> not-found, not a network error", async () => {
+  const notFoundErr = () => {
+    const e = new Error("HTTP 404");
+    e.notFound = true;
+    return Promise.reject(e);
+  };
+  const [d, c] = deps({ fetch: notFoundErr });
+  const r = await L.lookupProduct(d, "041679668658");
+  ok("error=not-found", r.error === L.ERR.NOT_FOUND, r.error);
+  ok("not reported as network", r.error !== L.ERR.NETWORK);
+  ok("no product", r.product === null);
+  ok("tried every barcode variant", c.fetched.length === 2, c.fetched.length);
+});
+
+t("404 does NOT mask a real network failure", async () => {
+  const [d] = deps({ fetch: () => Promise.reject(new Error("boom")) });
+  const r = await L.lookupProduct(d, "041679668658");
+  ok("error=network", r.error === L.ERR.NETWORK, r.error);
+});
+
 t("TIMEOUT + cached copy -> serves stale, warns", async () => {
   const cached = L.normalizeProduct(PRODUCT_JSON);
   const [d] = deps({ fetch: timeoutErr, cache: { "3017620422003": cached } });
