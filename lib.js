@@ -14,7 +14,7 @@
   // App version, shown in Settings -> About. This is the single source of
   // truth: sw.js builds its cache name from it, so bumping this is what makes
   // installed copies pick up a new release. Bump it on every deploy.
-  var APP_VERSION = "1.0.0";
+  var APP_VERSION = "1.0.1";
 
   // ---------------------------------------------------------------------
   // High-glycemic / refined-carb ingredient watchlist.
