@@ -1392,6 +1392,77 @@
       ? "Food database: seed " + seedInfo.version + "." : "";
   }
 
+  /**
+   * Ask the server what the current release is and, if it's newer than what's
+   * running, install it and reload.
+   *
+   * Why this reads lib.js off the network by hand rather than trusting
+   * registration.update(): a stale service worker serves the whole app shell
+   * from its own cache, so an ordinary fetch can answer with the OLD lib.js
+   * and report "up to date" forever. The cache-busting query string is what
+   * guarantees a real answer from the server.
+   */
+  function checkForUpdate() {
+    var btn = $("btnCheckUpdate");
+    var out = $("updateStatus");
+    if (navigator.onLine === false) {
+      status(out, "You're offline - connect and try again.", "err");
+      return Promise.resolve();
+    }
+    if (btn) { btn.disabled = true; btn.textContent = "Checking…"; }
+    function done(msg, kind) {
+      if (btn) { btn.disabled = false; btn.textContent = "Check for updates"; }
+      status(out, msg, kind || "");
+    }
+
+    // Bypass every cache: the point is to learn what the SERVER has.
+    return fetch("lib.js?v=" + Date.now(), { cache: "no-store" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.text();
+      })
+      .then(function (src) {
+        var m = src.match(/var APP_VERSION = "([^"]+)"/);
+        var latest = m && m[1];
+        if (!latest) throw new Error("no version in lib.js");
+        if (latest === L.APP_VERSION) {
+          done("You're up to date (version " + L.APP_VERSION + ").", "ok");
+          return;
+        }
+        done("Updating to " + latest + "…", "ok");
+        return applyUpdate();
+      })
+      .catch(function (e) {
+        done("Couldn't check for updates - " + (e && e.message ? e.message : "try again") + ".", "err");
+      });
+  }
+
+  /**
+   * Tear down the old shell and reload onto the new one. Deleting the caches
+   * matters as much as updating the worker: an installed copy that keeps its
+   * old cache can still be handed the old files on the next start.
+   */
+  function applyUpdate() {
+    var jobs = [];
+    if (window.caches && caches.keys) {
+      jobs.push(caches.keys().then(function (keys) {
+        return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+      }).catch(function () {}));
+    }
+    if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+      jobs.push(navigator.serviceWorker.getRegistrations().then(function (regs) {
+        // Unregister rather than update(): the next load installs the new
+        // worker from scratch, with no old cache left to fall back on.
+        return Promise.all(regs.map(function (r) { return r.unregister(); }));
+      }).catch(function () {}));
+    }
+    return Promise.all(jobs).then(function () {
+      // A plain reload can still be served from the HTTP cache; the query
+      // string guarantees a fresh document, which then pulls fresh assets.
+      location.replace(location.pathname + "?updated=" + Date.now());
+    });
+  }
+
   // -------------------------------------------------------------- settings
   // Each target is a settings key; blank means "no goal, just track it".
   var TARGETS = [
@@ -1650,6 +1721,7 @@
     $("btnQuickAdd").addEventListener("click", submitQuickAdd);
     $("btnImportRecipe").addEventListener("click", importRecipe);
     $("btnSaveSettings").addEventListener("click", saveSettings);
+    if ($("btnCheckUpdate")) $("btnCheckUpdate").addEventListener("click", checkForUpdate);
     $("btnExport").addEventListener("click", doExport);
     $("fileImport").addEventListener("change", function (e) { if (e.target.files[0]) doImport(e.target.files[0]); });
 

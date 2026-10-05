@@ -219,5 +219,14 @@ ok("no servings -> plain serving label",
 console.log("\n-- app version --");
 ok("APP_VERSION is semver", /^\d+\.\d+\.\d+$/.test(L.APP_VERSION), L.APP_VERSION);
 
+// sw.js repeats the version as a literal so that the file itself changes on
+// every release -- that byte change is the only thing that makes a browser
+// install a new worker. Two copies can drift, so assert they match.
+const swSrc = require("fs").readFileSync(require("path").join(__dirname, "sw.js"), "utf8");
+const swVer = (swSrc.match(/var APP_VERSION = "([^"]+)"/) || [])[1];
+ok("sw.js declares a version", !!swVer, swVer);
+ok("sw.js version matches lib.js", swVer === L.APP_VERSION,
+   "sw.js=" + swVer + " lib.js=" + L.APP_VERSION);
+
 console.log("\n" + (fail ? "FAILED " + fail : "ALL PASSED") + "  (" + pass + " assertions)\n");
 process.exit(fail ? 1 : 0);

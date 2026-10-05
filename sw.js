@@ -5,10 +5,19 @@
  * Shell files are precached. Open Food Facts lookups are network-first with a
  * cache fallback, so a product you scanned before still resolves offline.
  */
-// The cache name comes from the app version in lib.js, so bumping
-// APP_VERSION there retires the old shell cache on every installed copy.
-importScripts("lib.js");
-var CACHE = "foodlog-" + self.FoodLib.APP_VERSION;
+// The version is written out here as a literal, NOT imported from lib.js.
+// That is deliberate and load-bearing:
+//
+//   A browser only installs a new service worker when sw.js itself differs
+//   byte-for-byte. Importing the version meant this file never changed between
+//   releases, so an installed copy was never told to update -- and the old
+//   worker went on serving its cached lib.js, which reported the old version.
+//   The value meant to retire the cache was itself inside the cache.
+//
+// Keep this in sync with APP_VERSION in lib.js; `node bump-version.js <ver>`
+// writes both, and test_lib.js fails if they ever drift apart.
+var APP_VERSION = "1.0.2";
+var CACHE = "foodlog-" + APP_VERSION;
 var SHELL = [
   "./", "./index.html", "./styles.css", "./lib.js", "./store.js", "./app.js",
   "./manifest.webmanifest", "./icon-192.png", "./icon-512.png",
@@ -62,10 +71,23 @@ self.addEventListener("fetch", function (e) {
     return;
   }
 
-  // Everything else: cache first, network second, and never resolve undefined.
+  // App shell: network first, cache second. Cache-first would keep handing an
+  // installed copy its old HTML/JS forever -- the cache only gets replaced on
+  // activate, and activate only runs once a NEW worker installs, which needs
+  // fresh files to notice in the first place. Offline still works: any failure
+  // falls straight back to the cached copy.
   e.respondWith(
-    caches.match(e.request).then(function (hit) {
-      return hit || fetch(e.request).catch(function () { return Response.error(); });
+    fetch(e.request).then(function (res) {
+      // Only cache real, complete responses from our own origin.
+      if (res && res.ok && res.type === "basic") {
+        var copy = res.clone();
+        caches.open(CACHE).then(function (c) { c.put(e.request, copy); });
+      }
+      return res;
+    }).catch(function () {
+      return caches.match(e.request).then(function (hit) {
+        return hit || Response.error();
+      });
     })
   );
 });

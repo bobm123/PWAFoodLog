@@ -228,10 +228,26 @@ origin …`, `git branch -M main` — is only needed once; this repo already has
 
 Netlify or Cloudflare Pages work identically — drag the folder in.
 
-**Bump the version on every deploy.** `APP_VERSION` at the top of `lib.js` is the
-one place the version lives: it is shown in Settings → About, and `sw.js` builds
-its cache name from it. Installed copies only pick up new shell files when that
-cache name changes, so a deploy without a bump can leave phones on the old code.
+**Bump the version on every deploy.**
+
+```bash
+node bump-version.js 1.0.2
+```
+
+That writes `APP_VERSION` in **both** `lib.js` (shown in Settings → About) and
+`sw.js` (which names the cache `foodlog-<version>`). `test_lib.js` fails if the
+two ever drift apart.
+
+The version is deliberately repeated rather than imported. A browser only
+installs a new service worker when `sw.js` itself differs byte-for-byte; when
+`sw.js` imported the version from `lib.js` it never changed between releases,
+so installed copies were never told to update — and the old worker kept serving
+its cached `lib.js`, which reported the old version. The value meant to retire
+the cache was itself inside the cache.
+
+If a phone is somehow still stuck on an old release, **Settings → About →
+Check for updates** asks the server directly (bypassing every cache), then
+clears the caches, unregisters the worker and reloads.
 
 ### Local testing
 
