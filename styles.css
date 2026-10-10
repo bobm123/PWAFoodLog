@@ -365,3 +365,18 @@ button.savedok{
 /* the scanned-product header is tappable, like a food card */
 .prod[role=button]{cursor:pointer}
 .prod .nm .fchev{color:var(--dim);font-weight:400}
+
+/* ---- scan capture flash ---- */
+/* Blink the scan box when a barcode is read, so it's clear which code was
+   captured. The library builds this overlay and its corner marks with inline
+   styles, so the corners need !important to be re-tinted. */
+#reader .qr-shaded-region.qr-hit{
+  box-shadow:0 0 0 3px var(--green), 0 0 22px 4px rgba(61,220,132,.55);
+  transition:box-shadow .08s ease-out;
+}
+#reader .qr-shaded-region.qr-hit > div{
+  background:var(--green) !important;
+}
+@media (prefers-reduced-motion:reduce){
+  #reader .qr-shaded-region.qr-hit{transition:none}
+}

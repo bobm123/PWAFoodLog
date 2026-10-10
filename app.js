@@ -744,20 +744,51 @@
     scanner.start(
       { facingMode: "environment" },
       {
+        // The library CROPS the video to this box before decoding, so whatever
+        // falls outside is never seen. A wide box therefore clipped the ends
+        // off any barcode printed vertically -- common on cans and tubs, and
+        // not fixable by turning the phone, since the box turns with it.
+        // A square takes either orientation. Sized from the live viewfinder so
+        // it scales from a phone to a tablet.
+        qrbox: function (w, h) {
+          var side = Math.round(Math.min(w, h) * 0.7);
+          return { width: side, height: side };
+        },
         fps: 10,
-        qrbox: { width: 260, height: 160 },
         videoConstraints: {
           facingMode: "environment",
           width: { ideal: 1920 },
           height: { ideal: 1080 }
         }
       },
-      function (text) { stopScan(); lookup(text); },
+      function (text) {
+        // Show the hit, THEN tear the camera down -- stopScan() hides the
+        // reader synchronously, so flashing and stopping in the same tick
+        // would mean the flash is never actually seen.
+        flashCapture();
+        setTimeout(function () { stopScan(); lookup(text); }, 320);
+      },
       function () {}
     ).then(tuneCamera).catch(function (e) {
       status($("scanStatus"), "Camera unavailable (" + e + "). Use manual entry.", "err");
       stopScan();
     });
+  }
+
+  /**
+   * Blink the scan box green the instant a code is read, so it's obvious
+   * WHICH barcode was captured -- on a crowded label there is often more than
+   * one, and without this the view just vanishes and a product appears.
+   *
+   * The library owns the overlay, so this styles its shaded region; if that
+   * internal class ever changes, the flash is simply skipped.
+   */
+  function flashCapture() {
+    try {
+      var box = document.querySelector("#reader .qr-shaded-region");
+      if (!box) return;
+      box.classList.add("qr-hit");
+    } catch (e) { /* cosmetic only */ }
   }
 
   /**
