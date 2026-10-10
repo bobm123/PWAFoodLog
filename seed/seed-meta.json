@@ -1,8 +1,8 @@
 {
-  "version": "2026-07-28",
-  "builtAt": "2026-07-28T18:24:41-04:00",
-  "count": 25000,
+  "version": "2026-10-08",
+  "builtAt": "2026-10-08T14:25:48-04:00",
+  "count": 100000,
   "country": "united-states",
-  "limit": 25000,
+  "limit": 100000,
   "file": "products-us.ndjson.gz"
 }

@@ -74,7 +74,19 @@
   function getAll(store) {
     return tx(store, "readonly", function (s) { return s.getAll(); });
   }
+  /**
+   * Stamp a food with when it was first saved, so the Foods list can show the
+   * newest first. Done here rather than at each call site because foods are
+   * written from nine different places (scan, search, by-hand, recipe import,
+   * pending fill-in, edits); one of them would inevitably be missed.
+   *
+   * An existing savedAt is never overwritten -- editing a food must not move
+   * it to the top of the list.
+   */
   function put(store, value) {
+    if (store === "foods" && value && typeof value === "object" && !value.savedAt) {
+      value = Object.assign({}, value, { savedAt: new Date().toISOString() });
+    }
     return tx(store, "readwrite", function (s) { return s.put(value); });
   }
   function del(store, key) {

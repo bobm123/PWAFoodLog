@@ -146,6 +146,14 @@
     <div class="card">
       <h2>Custom foods &amp; recipes</h2>
       <p class="hint">Saved foods can be logged by the serving. Recipes never expire and work offline.</p>
+      <div class="sortrow">
+        <label for="foodSort">Sort</label>
+        <select id="foodSort">
+          <option value="recent">Recently added</option>
+          <option value="name">Name (A&ndash;Z)</option>
+          <option value="carbs">Net carbs (low first)</option>
+        </select>
+      </div>
       <div id="foodList" class="list"></div>
       <p class="empty" id="foodsEmpty">No custom foods yet.</p>
     </div>

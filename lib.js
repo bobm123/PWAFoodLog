@@ -317,6 +317,64 @@
    * same product updates it rather than duplicating. per100 is carried through
    * unchanged, so logging a serving computes identical macros to the card.
    */
+  /**
+   * Apply user edits to a saved food.
+   *
+   * Open Food Facts product names are frequently unhelpful ("Original Sauce"
+   * for A1), and roughly half of a large seed carries no ingredient list or
+   * NOVA score at all -- so the user has to be able to supply both. Editing
+   * the ingredients re-runs the GI watchlist, which is the whole point of
+   * typing them in.
+   *
+   * Only the fields present in `edits` are touched; everything else on the
+   * food (macros, barcode, image) is left exactly as it was. Returns null if
+   * the name would end up empty -- a nameless food is unfindable.
+   */
+  function foodWithEdits(food, edits) {
+    if (!food) return null;
+    edits = edits || {};
+    var out = Object.assign({}, food);
+
+    if (edits.name !== undefined) {
+      var nm = String(edits.name).trim();
+      if (!nm) return null;
+      out.name = nm;
+    }
+    if (edits.brand !== undefined) out.brand = String(edits.brand).trim();
+
+    if (edits.servingGrams !== undefined) {
+      var g = num(edits.servingGrams);
+      if (g > 0) {
+        out.servingGrams = g;
+        // Keep the printed label honest when it was just "<n> g"; a label the
+        // user wrote themselves ("2 scoops (34.5 g)") is left alone.
+        if (!out.servingLabel || /^\s*1 serving \(|^\s*[\d.]+\s*g\s*$/.test(out.servingLabel)) {
+          out.servingLabel = "1 serving (" + Math.round(g) + " g)";
+        }
+      }
+    }
+    if (edits.servingLabel !== undefined) {
+      var lab = String(edits.servingLabel).trim();
+      if (lab) out.servingLabel = lab;
+    }
+
+    if (edits.nova !== undefined) {
+      var n = parseInt(edits.nova, 10);
+      out.nova = (n >= 1 && n <= 4) ? n : null;
+    }
+
+    if (edits.ingredientsText !== undefined) {
+      var txt = String(edits.ingredientsText).trim();
+      out.ingredientsText = txt;
+      // The flags ARE the ingredients, re-derived. Re-scan rather than keeping
+      // whatever was computed from the old text.
+      out.flags = txt ? scanIngredients(txt) : [];
+    }
+
+    out.edited = true;
+    return out;
+  }
+
   function foodFromProduct(p) {
     p = p || {};
     var per = p.per100 || {};
@@ -778,6 +836,7 @@
     dailyTotals: dailyTotals,
     recipeFromAnalyzerJson: recipeFromAnalyzerJson,
     foodFromProduct: foodFromProduct,
+    foodWithEdits: foodWithEdits,
     pendingProductFood: pendingProductFood,
     parseCount: parseCount,
     formatCount: formatCount,

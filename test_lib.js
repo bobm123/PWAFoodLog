@@ -216,6 +216,47 @@ ok("no servings -> plain serving label",
    L.recipeFromAnalyzerJson({ title: "X", per_serving: { grams: 100, fat: 1, carb: 1, fiber: 0, protein: 1, kcal: 17 } })
      .servingLabel === "1 serving (100 g)");
 
+console.log("\n-- foodWithEdits --");
+const EDIT_BASE = {
+  id: "product:1", type: "product", name: "Original Sauce", brand: "", code: "1",
+  servingGrams: 100, servingLabel: "1 serving (100 g)",
+  per100: { fat: 1, carb: 2, fiber: 1, protein: 3, sugars: 0, kcal: 30 },
+  nova: null, additives: [], ingredientsText: "", flags: [], image: "x.jpg"
+};
+const renamed = L.foodWithEdits(EDIT_BASE, { name: "  A1 Sauce  " });
+ok("renames and trims", renamed.name === "A1 Sauce", renamed.name);
+ok("leaves macros alone", renamed.per100.carb === 2);
+ok("leaves barcode and image alone", renamed.code === "1" && renamed.image === "x.jpg");
+ok("marks the record edited", renamed.edited === true);
+ok("does not mutate the original", EDIT_BASE.name === "Original Sauce");
+
+ok("empty name is rejected", L.foodWithEdits(EDIT_BASE, { name: "   " }) === null);
+ok("null food is rejected", L.foodWithEdits(null, { name: "x" }) === null);
+
+const novaSet = L.foodWithEdits(EDIT_BASE, { nova: "4" });
+ok("accepts a NOVA score", novaSet.nova === 4, novaSet.nova);
+ok("rejects out-of-range NOVA", L.foodWithEdits(EDIT_BASE, { nova: "9" }).nova === null);
+ok("blank NOVA clears to null", L.foodWithEdits(EDIT_BASE, { nova: "" }).nova === null);
+
+// Typing ingredients is what makes the GI flags work -- they must re-derive.
+const withIng = L.foodWithEdits(EDIT_BASE, { ingredientsText: "tomato puree, maltodextrin, salt" });
+ok("stores the ingredients", /maltodextrin/.test(withIng.ingredientsText));
+ok("recomputes GI flags from the new text", withIng.flags.length > 0, withIng.flags.length);
+ok("flags the high-GI hit", withIng.flags.some(f => /maltodextrin/i.test(f.label)),
+   JSON.stringify(withIng.flags.map(f => f.label)));
+const cleared = L.foodWithEdits(withIng, { ingredientsText: "" });
+ok("clearing ingredients clears the flags", cleared.flags.length === 0);
+
+const regrammed = L.foodWithEdits(EDIT_BASE, { servingGrams: 17 });
+ok("updates serving grams", regrammed.servingGrams === 17);
+ok("refreshes an auto-generated label", regrammed.servingLabel === "1 serving (17 g)", regrammed.servingLabel);
+const custom = L.foodWithEdits(
+  Object.assign({}, EDIT_BASE, { servingLabel: "2 scoops (34.5 g)" }), { servingGrams: 40 });
+ok("keeps a hand-written label", custom.servingLabel === "2 scoops (34.5 g)", custom.servingLabel);
+ok("ignores a zero serving", L.foodWithEdits(EDIT_BASE, { servingGrams: 0 }).servingGrams === 100);
+
+ok("untouched fields stay untouched", L.foodWithEdits(EDIT_BASE, {}).name === "Original Sauce");
+
 console.log("\n-- app version --");
 ok("APP_VERSION is semver", /^\d+\.\d+\.\d+$/.test(L.APP_VERSION), L.APP_VERSION);
 

@@ -47,8 +47,16 @@ ok("nearly all products have real nutrition (zero-macro tail is small)",
 
 console.log("\n-- flags are computed from the seed's ingredients --");
 // The seed carries ingredients_text so the app's whole point (GI flags) works.
+//
+// The bar is half, not most: coverage falls off with seed size because Open
+// Food Facts documents popular products far better than the long tail. At 25k
+// the seed ran ~89% with ingredients; at 100k it is ~55%, and the top 25k of
+// that same build is still ~89% -- the tail is thinner, the pipeline is fine.
+// This threshold exists to catch a BROKEN build (a projection that dropped the
+// column, an empty file), so it sits below the honest rate for a large seed
+// while still failing loudly if ingredients disappear.
 const withIngredients = normalized.filter(function (p) { return p.ingredientsText; });
-ok("most products carry an ingredient list", withIngredients.length >= normalized.length * 0.6,
+ok("a substantial share carry an ingredient list", withIngredients.length >= normalized.length * 0.4,
    withIngredients.length + "/" + normalized.length);
 const anyFlagged = normalized.some(function (p) { return p.flags && p.flags.length; });
 ok("at least one product trips the GI watchlist", anyFlagged);

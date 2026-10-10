@@ -395,27 +395,45 @@
   }
 
   // ------------------------------------------------------------ product UI
+  // Whether the scanned product's extra detail is expanded. Remembered across
+  // re-renders (saving, nutrition fixes) so it doesn't snap shut mid-read.
+  var productDetailOpen = false;
+  var currentProductStale = false;
+
   function renderProduct(p, stale) {
     currentProduct = p;
+    currentProductStale = !!stale;
     var serving = p.servingGrams || 100;
     var hasServ = Number(p.servingGrams) > 0;
     // "1 tbsp (17 g)" for display; "1 tbsp" as the stored portion label.
-    var servFull = p.servingSize
-      ? L.shortPortionLabel(p.servingSize) + " (" + fmt(p.servingGrams, 0) + " g)"
-      : "1 serving (" + fmt(p.servingGrams, 0) + " g)";
+    // "1 tbsp (17 g)" is useful; "15 g (15 g)" is not -- when the label's
+    // serving is already just a gram weight, don't repeat it in brackets.
+    var servShortLbl = p.servingSize ? L.shortPortionLabel(p.servingSize) : "";
+    var gramsOnly = /^[\d.]+\s*g$/i.test(servShortLbl.replace(/\s+/g, " ").trim());
+    var servFull = !p.servingSize
+      ? "1 serving (" + fmt(p.servingGrams, 0) + " g)"
+      : gramsOnly
+      ? fmt(p.servingGrams, 0) + " g"
+      : servShortLbl + " (" + fmt(p.servingGrams, 0) + " g)";
     var servShort = L.shortPortionLabel(p.servingSize || "1 serving");
     $("productCard").innerHTML =
       '<div class="card">' +
       (stale ? '<p class="stale">Saved copy - not refreshed from Open Food Facts.</p>' : "") +
-      '<div class="prod">' +
+      // Tapping the name opens the same breakdown a saved food's card shows.
+      '<div class="prod" id="prodHead" role="button" tabindex="0" aria-expanded="' +
+        (productDetailOpen ? "true" : "false") + '">' +
         (p.image ? '<img src="' + esc(p.image) + '" alt="">' : "") +
-        '<div><div class="nm"><b>' + esc(p.name) + "</b></div>" +
+        '<div><div class="nm"><b>' + esc(p.name) + "</b>" +
+          '<span class="fchev"> ' + (productDetailOpen ? "&and;" : "&or;") + "</span></div>" +
         (p.brand ? '<div class="sub">' + esc(p.brand) + "</div>" : "") +
         '<div class="badges">' + novaBadge(p.nova) + flagBadges(p.flags) + "</div></div>" +
       "</div>" +
       '<div class="macros" style="margin-top:.6rem">Per 100 g: net carbs <b>' +
         fmt(L.netCarbs(p.per100.carb, p.per100.fiber), 1) + " g</b> &middot; fat <b>" +
         fmt(p.per100.fat, 1) + " g</b> &middot; protein <b>" + fmt(p.per100.protein, 1) + " g</b></div>" +
+      (productDetailOpen
+        ? '<div class="fdetail">' + detailRowsHtml(p, servFull) + "</div>"
+        : "") +
       (p.additives.length ? '<p class="hint">Additives: ' + esc(p.additives.join(", ")) + "</p>" : "") +
       flagWarnBox(p.flags) +
       (L.hasNutrition(p) ? "" :
@@ -439,6 +457,12 @@
             '<p class="status" id="fixStatus"></p>' +
           "</div>" +
         "</div>") +
+      // A scanned record with no ingredients shows no GI flags, which reads
+      // the same as "nothing to flag". Say which it is. There's no saved food
+      // to edit yet, so this points at the way to get one.
+      ((p.ingredientsText || "").trim() || !L.hasNutrition(p) ? "" :
+        '<p class="missnote">&#9432; No ingredient list on this record, so high-GI ' +
+        "ingredients can't be flagged. Save it to your Foods to add them from the label.</p>") +
       '<div class="row portionrow" style="margin-top:.7rem">' +
         '<input id="portionCount" inputmode="decimal" value="' + (hasServ ? "1" : serving) +
           '" aria-label="How much">' +
@@ -488,6 +512,12 @@
     });
     if ($("btnSaveProduct")) {
       $("btnSaveProduct").addEventListener("click", function () { saveProduct(p, this); });
+    }
+    if ($("prodHead")) {
+      $("prodHead").addEventListener("click", toggleProductDetail);
+      $("prodHead").addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleProductDetail(); }
+      });
     }
     // Opened from search results? Give the page its back button.
     if (document.getElementById("panel-scan").classList.contains("detailview")) addBackBar();
@@ -620,7 +650,7 @@
       if (localP) {
         $("btnLookup").disabled = false;
         status($("scanStatus"), "", "");
-        renderProduct(localP, false);
+        showProductPage(localP, false);
         return;
       }
       status($("scanStatus"), navigator.onLine === false
@@ -630,7 +660,7 @@
         $("btnLookup").disabled = false;
         if (r.product) {
           status($("scanStatus"), r.stale ? r.message : "", r.stale ? "warn" : "");
-          renderProduct(r.product, r.stale);
+          showProductPage(r.product, r.stale);
           return;
         }
         // No product. If this was a connectivity failure (not a genuine
@@ -900,13 +930,34 @@
     });
   }
 
+  function toggleProductDetail() {
+    productDetailOpen = !productDetailOpen;
+    // Re-render with the same staleness, or expanding would quietly drop the
+    // "saved copy - not refreshed" banner.
+    if (currentProduct) renderProduct(currentProduct, currentProductStale);
+  }
+
+  /**
+   * Show a scanned or looked-up product as its own page: the scanner and
+   * search cards hide and the view starts at the top. Without this the card
+   * renders *below* whatever search results are on screen, so after a search
+   * a new scan appears off the bottom of the page.
+   */
+  function showProductPage(p, stale) {
+    productDetailOpen = false;           // each new scan starts collapsed
+    enterSearchDetail();
+    renderProduct(p, stale);
+    window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });
+  }
+
   function pickSearchResult(i) {
     var p = lastSearchResults[i];
     if (!p) return;
     // Cache a live Open Food Facts hit so it resolves instantly (and offline)
     // next time. Local/seed hits are already in the cache.
     if (p._online && p.code) S.putCachedProduct(p.code, p);
-    enterSearchDetail();
+    productDetailOpen = false;
+    enterSearchDetail(true);
     renderProduct(p, false);
     window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });
   }
@@ -917,7 +968,9 @@
    * search cards hide, a back button restores them. The results list is left
    * untouched underneath, so back is instant and keeps scroll/query state.
    */
-  function enterSearchDetail() {
+  var detailFromSearch = false;
+  function enterSearchDetail(fromSearch) {
+    detailFromSearch = !!fromSearch;
     document.getElementById("panel-scan").classList.add("detailview");
   }
   function exitSearchDetail() {
@@ -931,8 +984,11 @@
   }
   function addBackBar() {
     if ($("btnBackResults")) return;
+    // "Back to results" only makes sense if results are what you came from;
+    // a scan arrives here with none.
+    var label = detailFromSearch ? "Back to results" : "Back to scan";
     $("productCard").insertAdjacentHTML("afterbegin",
-      '<button id="btnBackResults" class="backbtn">&#8592; Back to results</button>');
+      '<button id="btnBackResults" class="backbtn">&#8592; ' + label + "</button>");
     $("btnBackResults").addEventListener("click", exitSearchDetail);
   }
 
@@ -1041,14 +1097,22 @@
   var expandedFoods = {};
 
   function toggleFoodDetail(id) {
+    // Don't let a stray tap on the header collapse a card that's being
+    // edited -- that would throw away whatever was typed.
+    if (editingFoodId === id) return;
     if (expandedFoods[id]) delete expandedFoods[id];
     else expandedFoods[id] = true;
     renderFoods();
   }
 
   /** The extra rows revealed when a food card is expanded. */
-  function foodDetailRows(f) {
-    var m = L.macrosForGrams(f.per100, f.servingGrams);
+  /**
+   * The per-serving breakdown shared by a saved food's expanded card and a
+   * scanned product's detail, so both read identically. `item` needs per100,
+   * servingGrams and optionally servingLabel/brand/code/ingredientsText.
+   */
+  function detailRowsHtml(item, servingLabel) {
+    var m = L.macrosForGrams(item.per100, item.servingGrams || 100);
     var rows = [];
     function row(label, value) {
       rows.push('<div class="drow"><span class="dk">' + label +
@@ -1060,19 +1124,165 @@
     row("Net carbs", "<b>" + fmt(m.netCarb, 1) + " g</b>");
     row("Fat", fmt(m.fat, 1) + " g");
     row("Protein", fmt(m.protein, 1) + " g");
-    row("Serving", esc(f.servingLabel || fmt(f.servingGrams, 0) + " g"));
-    if (f.brand) row("Brand", esc(f.brand));
-    if (f.code) row("Barcode", esc(f.code));
-    var ing = (f.ingredientsText || "").trim();
+    row("Serving", esc(servingLabel || item.servingLabel || fmt(item.servingGrams, 0) + " g"));
+    if (item.brand) row("Brand", esc(item.brand));
+    if (item.code) row("Barcode", esc(item.code));
+    var ing = (item.ingredientsText || "").trim();
     if (ing) {
       rows.push('<div class="ding"><span class="dk">Ingredients</span>' +
                 "<p>" + esc(ing) + "</p></div>");
     }
-    return '<div class="fdetail">' + rows.join("") + "</div>";
+    return rows.join("");
+  }
+
+  function foodDetailRows(f) {
+    return '<div class="fdetail">' + detailRowsHtml(f) +
+      missingDataNote(f, f.id) +
+      '<div class="acts" style="margin-top:.5rem">' +
+        '<button class="ghost tiny" data-editfood="' + esc(f.id) + '">Edit details</button>' +
+      "</div>" +
+    "</div>";
+  }
+
+  /**
+   * Say so when a record has no ingredient list or no NOVA score.
+   *
+   * Flagging processing is the app's reason to exist, and a product with no
+   * ingredients silently shows no flags -- which reads identically to "this
+   * food is clean". Roughly half of the bundled database is missing one or
+   * both, so this is phrased as a quiet note, not an alarm.
+   */
+  function missingDataNote(f, id) {
+    if (f.pending || f.notFound) return "";      // stubs have their own message
+    var noIng = !(f.ingredientsText || "").trim();
+    var noNova = !f.nova;
+    if (!noIng && !noNova) return "";
+    var what = noIng && noNova ? "No ingredient list or NOVA score"
+             : noIng ? "No ingredient list"
+             : "No NOVA processing score";
+    var why = noIng
+      ? " on this record, so high-GI ingredients can't be flagged."
+      : " on this record.";
+    return '<p class="missnote">&#9432; ' + what + why +
+      ' <button class="linkish" data-editfood="' + esc(id) + '">Add it from the label</button></p>';
+  }
+
+  // id of the food whose edit form is open, if any.
+  var editingFoodId = null;
+
+  function startEditFood(id) {
+    editingFoodId = id;
+    expandedFoods[id] = true;      // the form lives inside the expanded card
+    renderFoods().then(function () {
+      var el = $("efName");
+      if (el) { el.focus(); el.scrollIntoView({ block: "center" }); }
+    });
+  }
+
+  function cancelEditFood() {
+    editingFoodId = null;
+    renderFoods();
+  }
+
+  /** The inline edit form, shown in place of the read-only detail rows. */
+  function foodEditForm(f) {
+    function val(v) { return esc(v == null ? "" : String(v)); }
+    return '<div class="fdetail fedit">' +
+      '<div class="grid2">' +
+        '<label>Name<input id="efName" value="' + val(f.name) + '"></label>' +
+        '<label>Brand<input id="efBrand" value="' + val(f.brand) + '"></label>' +
+        '<label>Serving (g)<input id="efGrams" type="number" step="any" value="' +
+          val(f.servingGrams) + '"></label>' +
+        '<label>NOVA 1-4<input id="efNova" type="number" min="1" max="4" step="1" value="' +
+          val(f.nova || "") + '"></label>' +
+      "</div>" +
+      '<label class="efing">Ingredients' +
+        '<textarea id="efIngredients" rows="3" placeholder="Copy the ingredient list off the package">' +
+          val(f.ingredientsText) + "</textarea></label>" +
+      '<p class="hint">Ingredients are re-scanned for high-GI items when you save. ' +
+        "NOVA: 1 unprocessed, 2 culinary ingredient, 3 processed, 4 ultra-processed.</p>" +
+      '<div class="acts">' +
+        '<button class="primary tiny" data-savefood="' + esc(f.id) + '">Save</button>' +
+        '<button class="ghost tiny" data-cancelfoodedit="1">Cancel</button>' +
+      "</div>" +
+      '<p class="status" id="efStatus"></p>' +
+    "</div>";
+  }
+
+  function saveFoodEdits(id) {
+    return S.getAll("foods").then(function (foods) {
+      var f = foods.filter(function (x) { return x.id === id; })[0];
+      if (!f) { editingFoodId = null; return renderFoods(); }
+      var updated = L.foodWithEdits(f, {
+        name: $("efName").value,
+        brand: $("efBrand").value,
+        servingGrams: $("efGrams").value,
+        nova: $("efNova").value,
+        ingredientsText: $("efIngredients").value
+      });
+      if (!updated) {
+        status($("efStatus"), "Give the food a name.", "err");
+        return;
+      }
+      return S.put("foods", updated).then(function () {
+        editingFoodId = null;
+        searchIndex = null;                    // the new name joins search
+        var n = (updated.flags || []).length;
+        toast(n ? "Saved - " + n + " ingredient flag" + (n === 1 ? "" : "s") + " found"
+                : "Saved " + updated.name);
+        return renderFoods();
+      });
+    });
+  }
+
+  /**
+   * Foods saved before savedAt existed have no timestamp. Stamp them once, in
+   * the order they already appear, with times in the past -- so the list looks
+   * unchanged today and anything saved from now on sorts above them.
+   *
+   * Idempotent: foods that already carry savedAt are skipped, so this is a
+   * no-op on every run after the first.
+   */
+  function backfillSavedAt() {
+    return S.getAll("foods").then(function (foods) {
+      var missing = (foods || []).filter(function (f) { return !f.savedAt; });
+      if (!missing.length) return 0;
+      // The list renders newest-first, so stamp in REVERSE: the first food in
+      // today's order gets the latest time and stays at the top. Stamping
+      // ascending would silently flip the whole list on first run.
+      var base = Date.now() - 60000 - missing.length * 1000;
+      return Promise.all(missing.map(function (f, i) {
+        f.savedAt = new Date(base + (missing.length - 1 - i) * 1000).toISOString();
+        return S.put("foods", f);
+      })).then(function () { return missing.length; });
+    }, function () { return 0; });
+  }
+
+  // How the Foods list is ordered. Persisted so it survives a restart.
+  var foodSort = "recent";
+
+  function sortFoods(foods) {
+    var list = (foods || []).slice();
+    if (foodSort === "name") {
+      list.sort(function (a, b) { return (a.name || "").localeCompare(b.name || ""); });
+    } else if (foodSort === "carbs") {
+      list.sort(function (a, b) {
+        // Stubs have no real macros; keep them out of the "lowest carb" slot.
+        var ax = a.pending || a.notFound, bx = b.pending || b.notFound;
+        if (ax !== bx) return ax ? 1 : -1;
+        return L.macrosForGrams(a.per100, a.servingGrams).netCarb -
+               L.macrosForGrams(b.per100, b.servingGrams).netCarb;
+      });
+    } else {
+      // Newest first. Anything still unstamped sorts last.
+      list.sort(function (a, b) { return String(b.savedAt || "").localeCompare(String(a.savedAt || "")); });
+    }
+    return list;
   }
 
   function renderFoods() {
     return S.getAll("foods").then(function (foods) {
+      foods = sortFoods(foods);
       $("foodsEmpty").classList.toggle("hidden", foods.length > 0);
       $("foodList").innerHTML = foods.map(function (f) {
         var m = L.macrosForGrams(f.per100, f.servingGrams);
@@ -1120,7 +1330,7 @@
             "</div>" +
             (expandable ? '<span class="fchev">' + (open ? "&and;" : "&or;") + "</span>" : "") +
           "</div>" +
-          (open ? foodDetailRows(f) : "") +
+          (editingFoodId === f.id ? foodEditForm(f) : (open ? foodDetailRows(f) : "")) +
           '<div class="badges">' + novaBadge(f.nova) + flagBadges(f.flags) + "</div>" +
           '<div class="acts">' + acts + "</div>" +
         "</div>";
@@ -1722,6 +1932,13 @@
     $("btnImportRecipe").addEventListener("click", importRecipe);
     $("btnSaveSettings").addEventListener("click", saveSettings);
     if ($("btnCheckUpdate")) $("btnCheckUpdate").addEventListener("click", checkForUpdate);
+    if ($("foodSort")) {
+      $("foodSort").addEventListener("change", function () {
+        foodSort = this.value;
+        S.setSetting("foodSort", foodSort);
+        renderFoods();
+      });
+    }
     $("btnExport").addEventListener("click", doExport);
     $("fileImport").addEventListener("change", function (e) { if (e.target.files[0]) doImport(e.target.files[0]); });
 
@@ -1751,6 +1968,9 @@
       if (!b) return;
       if (b.dataset.del) S.del("entries", Number(b.dataset.del)).then(renderToday);
       else if (b.dataset.delfood) S.del("foods", b.dataset.delfood).then(renderFoods);
+      else if (b.dataset.editfood) startEditFood(b.dataset.editfood);
+      else if (b.dataset.savefood) saveFoodEdits(b.dataset.savefood);
+      else if (b.dataset.cancelfoodedit) cancelEditFood();
       else if (b.dataset.fetchfood) fetchPendingFood(b.dataset.fetchfood);
       else if (b.dataset.byhand) {
         // Prefill the by-hand form with the barcode so the saved food takes
@@ -1798,7 +2018,18 @@
 
     S.requestPersistence();
     updateAbout();
-    loadSettings().then(renderToday).then(renderFoods);
+    loadSettings()
+      .then(function () {
+        return S.getSetting("foodSort", "recent").then(function (v) {
+          foodSort = v || "recent";
+          if ($("foodSort")) $("foodSort").value = foodSort;
+        }, function () {});
+      })
+      // Stamp pre-savedAt foods before the first render, so the list doesn't
+      // visibly reorder a moment after it appears.
+      .then(backfillSavedAt)
+      .then(renderToday)
+      .then(renderFoods);
 
     // Load the bundled food database, then reconcile any pending scans and
     // show the on-device database status. All best-effort and non-blocking.
