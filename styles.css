@@ -103,6 +103,9 @@ code{background:#0d100f;padding:.1rem .3rem;border-radius:4px;font-size:.85em}
 
 button{
   border-radius:8px;padding:.6rem .9rem;font-size:.9rem;cursor:pointer;border:1px solid transparent;
+  /* Without this a button uses the UA font (Arial), not the page stack, so it
+     sits a couple of pixels shorter than any adjacent link-styled control. */
+  font-family:inherit;
 }
 button.primary{background:var(--green);color:#06160e;font-weight:600}
 button.ghost{background:transparent;border-color:var(--line);color:var(--fg)}
@@ -380,3 +383,15 @@ button.savedok{
 @media (prefers-reduced-motion:reduce){
   #reader .qr-shaded-region.qr-hit{transition:none}
 }
+
+/* An anchor that sits beside a ghost button and matches it. The button rules
+   are scoped to `button`, so the geometry is repeated here rather than shared. */
+a.btnlink{
+  display:inline-block;border-radius:8px;border:1px solid var(--line);
+  background:transparent;color:var(--fg);text-decoration:none;
+  /* font:inherit first -- it resets font-size, so the size comes after it. */
+  font:inherit;font-size:.9rem;line-height:normal;
+  padding:.6rem .9rem;cursor:pointer;
+}
+a.btnlink.tiny{padding:.3rem .5rem;font-size:.75rem}
+a.btnlink:hover{border-color:var(--green);color:var(--green)}
