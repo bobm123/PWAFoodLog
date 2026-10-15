@@ -77,6 +77,37 @@ t("404 does NOT mask a real network failure", async () => {
   ok("error=network", r.error === L.ERR.NETWORK, r.error);
 });
 
+// Amazon relabels some packs with its own ASIN in Code 128 instead of the
+// manufacturer's UPC/EAN. Open Food Facts is keyed on GTINs and answers
+// "no code or invalid code", which as a plain NOT_FOUND would imply the
+// product might simply be missing and worth retrying. It never will be.
+t("Amazon ASIN -> not-a-gtin, no network call", async () => {
+  let fetched = false;
+  const d = {
+    isOnline: () => true,
+    fetchJson: () => { fetched = true; return Promise.resolve(NOT_FOUND); },
+    getCached: () => Promise.resolve(null),
+    putCached: () => Promise.resolve()
+  };
+  const r = await L.lookupProduct(d, "X001RJOO83");
+  ok("error=not-a-gtin", r.error === L.ERR.NOT_A_GTIN, r.error);
+  ok("no product", r.product === null);
+  ok("never hit the network", fetched === false);
+  ok("says it is an Amazon code", /amazon/i.test(r.message), r.message);
+  ok("points at manual entry", /by hand/i.test(r.message), r.message);
+});
+
+t("ASIN detection does not catch real barcodes", async () => {
+  ["X001RJOO83", "B07H8QMZWV", "B0CXYZ1234"].forEach(function (c) {
+    ok("ASIN: " + c, L.isAmazonCode(c) === true, c);
+  });
+  ["5901234123457", "816180021354", "0816180021354", "3017620422003", "12345678"]
+    .forEach(function (c) {
+      ok("not an ASIN: " + c, L.isAmazonCode(c) === false, c);
+    });
+});
+
+
 t("TIMEOUT + cached copy -> serves stale, warns", async () => {
   const cached = L.normalizeProduct(PRODUCT_JSON);
   const [d] = deps({ fetch: timeoutErr, cache: { "3017620422003": cached } });

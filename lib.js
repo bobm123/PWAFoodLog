@@ -695,6 +695,23 @@
    * frequently stored in Open Food Facts as the 13-digit EAN with a leading
    * zero (and occasionally the reverse), so try both before giving up.
    */
+  /**
+   * Is this an Amazon ASIN rather than a real product barcode?
+   *
+   * Amazon prints its own Code 128 label on goods it repackages, carrying an
+   * ASIN ("X001RJOO83") instead of the manufacturer's UPC/EAN. Open Food
+   * Facts is keyed on GTINs, so it answers "no code or invalid code" -- which
+   * the app would otherwise report as a plain "not in Open Food Facts",
+   * implying the entry might simply be missing and worth retrying later. It
+   * never will be: there is no GTIN to find.
+   *
+   * B0... is the usual retail form; X00... is assigned to items that have no
+   * manufacturer barcode of their own, which is exactly the case here.
+   */
+  function isAmazonCode(code) {
+    return /^(B0[A-Z0-9]{8}|X00[A-Z0-9]{7})$/i.test(String(code || "").trim());
+  }
+
   function barcodeVariants(code) {
     code = String(code || "").trim();
     var out = [code];
@@ -723,14 +740,18 @@
     OFFLINE: "offline",     // no connection and nothing cached
     TIMEOUT: "timeout",     // request took too long
     NETWORK: "network",     // request failed
-    NOT_FOUND: "not-found"  // reached the server; barcode genuinely unknown
+    NOT_FOUND: "not-found", // reached the server; barcode genuinely unknown
+    NOT_A_GTIN: "not-a-gtin" // scanned something that isn't a product barcode
   };
 
   var ERR_MESSAGE = {
     offline: "You're offline and this barcode isn't saved on this device. Enter it by hand below.",
     timeout: "Open Food Facts didn't respond. Check your signal, or enter it by hand.",
     network: "Couldn't reach Open Food Facts. Check your signal, or enter it by hand.",
-    "not-found": "This barcode isn't in Open Food Facts. Enter it by hand below."
+    "not-found": "This barcode isn't in Open Food Facts. Enter it by hand below.",
+    "not-a-gtin": "That's an Amazon item code, not a product barcode - no food " +
+                  "database can look it up. Enter the nutrition by hand below; " +
+                  "the code is saved, so scanning this pack again will find it."
   };
 
   function isTimeoutError(err) {
@@ -757,6 +778,14 @@
    * Resolves to { product, source, stale, offline, error, message }.
    */
   function lookupProduct(deps, code) {
+    // No point asking Open Food Facts about an Amazon item code, and a bare
+    // "not found" would misrepresent why it failed.
+    if (isAmazonCode(code)) {
+      return Promise.resolve({
+        product: null, source: null, stale: false, offline: false,
+        error: ERR.NOT_A_GTIN, message: ERR_MESSAGE[ERR.NOT_A_GTIN]
+      });
+    }
     var variants = barcodeVariants(code);
 
     function fromCache(reason) {
@@ -843,6 +872,7 @@
     portionDisplay: portionDisplay,
     shortPortionLabel: shortPortionLabel,
     barcodeVariants: barcodeVariants,
+    isAmazonCode: isAmazonCode,
     MEALS: MEALS,
     MEAL_LABELS: MEAL_LABELS,
     guessMeal: guessMeal,

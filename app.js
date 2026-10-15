@@ -635,6 +635,22 @@
 
   function lookup(code) {
     code = String(code || "").trim();
+
+    // An Amazon-relabelled pack scans as an ASIN in Code 128. It passes
+    // through the scanner just fine, so it reaches here and would otherwise
+    // be dismissed as "that doesn't look like a barcode" -- true but useless,
+    // since the user is holding a real product. Show the card that explains
+    // the situation and offers manual entry instead.
+    if (L.isAmazonCode(code)) {
+      lastCode = code;
+      // Open it as its own page so it is not buried under search results.
+      productDetailOpen = false;
+      enterSearchDetail();
+      renderFallback(code, L.ERR.NOT_A_GTIN);
+      window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });
+      return;
+    }
+
     if (!/^\d{6,14}$/.test(code)) {
       status($("scanStatus"), "That doesn't look like a barcode.", "err");
       return;
@@ -664,8 +680,11 @@
           return;
         }
         // No product. If this was a connectivity failure (not a genuine
-        // "unknown to OFF"), remember the barcode so we can fill it in later.
-        if (r.error !== L.ERR.NOT_FOUND) S.addPending(code);
+        // "unknown to OFF", and not a code no database could ever hold),
+        // remember the barcode so we can fill it in later.
+        if (r.error !== L.ERR.NOT_FOUND && r.error !== L.ERR.NOT_A_GTIN) {
+          S.addPending(code);
+        }
         status($("scanStatus"), r.message, "err");
         renderFallback(code, r.error);
       });
@@ -674,10 +693,20 @@
 
   /** When a lookup can't produce a product, keep the user moving. */
   function renderFallback(code, err) {
-    var retryable = err !== L.ERR.NOT_FOUND;   // offline/timeout/network vs unknown
+    // An Amazon item code can never resolve -- there is no GTIN behind it --
+    // so offering Retry or "Save for later" would just waste the user's time
+    // at the shelf. Treat it like a definite miss, but explain the reason.
+    var notAGtin = err === L.ERR.NOT_A_GTIN;
+    var retryable = err !== L.ERR.NOT_FOUND && !notAGtin;
+    var heading = notAGtin
+      ? "Not a food barcode"
+      : "Couldn't load " + esc(code);
     $("productCard").innerHTML =
       '<div class="card">' +
-        "<h2>Couldn't load " + esc(code) + "</h2>" +
+        "<h2>" + heading + "</h2>" +
+        (notAGtin
+          ? '<p class="hint">Scanned <b>' + esc(code) + "</b> \u2014 an Amazon item code.</p>"
+          : "") +
         '<p class="hint">' + esc(L.ERR_MESSAGE[err] || "Lookup failed.") + "</p>" +
         '<div class="row">' +
           (retryable ? '<button id="btnSaveLater" class="primary">Save for later</button>' : "") +
@@ -686,6 +715,10 @@
         "</div>" +
         (retryable
           ? '<p class="hint">At the store with bad signal? <b>Save for later</b> keeps the barcode; its nutrition fills in automatically once you\'re back online.</p>'
+          : notAGtin
+          ? '<p class="hint">Amazon relabels some packs with its own code instead of the ' +
+            "maker's barcode. Copy the numbers off the nutrition panel once and this " +
+            "pack will resolve instantly next time, even offline.</p>"
           : '<p class="hint">Logging, custom foods and totals all keep working offline.</p>') +
       "</div>";
 
