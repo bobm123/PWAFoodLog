@@ -718,6 +718,130 @@
     });
   }
 
+  // ------------------------------------------------ scan-orientation shim
+  //
+  // html5-qrcode decodes with ZXing and hardcodes its TRY_HARDER hint to
+  // false, so ZXing never rotates the image and samples only HORIZONTAL scan
+  // lines. A barcode whose bars run horizontally -- common as soon as a can
+  // or pouch is held the "wrong" way up -- is therefore never decoded no
+  // matter how well it is framed, which makes the scanner look broken.
+  //
+  // Verified with a generated EAN-13: bars vertical decodes, the same code
+  // with bars horizontal fails, and the same image rotated 90 degrees
+  // decodes again.
+  //
+  // Patching the vendored bundle would work but fetch-vendor.sh overwrites
+  // it. Instead we hand the library a canvas stream containing the camera
+  // TWICE -- upright, and rotated 90 degrees beneath it. Whichever way the
+  // barcode is turned, one of the two copies presents its bars vertically.
+  // Stacking rather than alternating in time matters: every decode attempt
+  // sees both orientations, so reading a code never depends on a frame
+  // landing in the right phase.
+  //
+  // iOS Safari has no native BarcodeDetector, so it always takes this ZXing
+  // path -- which is exactly where the problem shows up.
+
+  var rotShim = null;        // active shim while a rotated scan is running
+
+  /**
+   * Wrap a camera stream in a canvas holding both orientations.
+   * Returns { stream, stop } or null when the browser can't do it.
+   */
+  function makeDualOrientationStream(srcStream) {
+    var probe = document.createElement("canvas");
+    if (typeof probe.captureStream !== "function") return null;
+
+    var track = srcStream.getVideoTracks()[0];
+    if (!track) return null;
+    var st = track.getSettings ? track.getSettings() : {};
+    var vw = st.width || 1280, vh = st.height || 720;
+
+    var video = document.createElement("video");
+    video.srcObject = srcStream;
+    video.muted = true;
+    video.playsInline = true;
+    video.setAttribute("playsinline", "");
+
+    // Each copy occupies a square cell so a rotated frame fits either way.
+    var cell = Math.max(vw, vh);
+    var canvas = document.createElement("canvas");
+    canvas.width = cell;
+    canvas.height = cell * 2;
+    var ctx = canvas.getContext("2d");
+
+    var raf = null, stopped = false;
+
+    function paint() {
+      if (stopped) return;
+      raf = requestAnimationFrame(paint);
+      if (video.readyState < 2) return;
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, cell, cell * 2);
+      // upright
+      ctx.save();
+      ctx.translate(cell / 2, cell / 2);
+      ctx.drawImage(video, -vw / 2, -vh / 2, vw, vh);
+      ctx.restore();
+      // rotated 90 degrees, directly below
+      ctx.save();
+      ctx.translate(cell / 2, cell + cell / 2);
+      ctx.rotate(Math.PI / 2);
+      ctx.drawImage(video, -vw / 2, -vh / 2, vw, vh);
+      ctx.restore();
+    }
+
+    var out = canvas.captureStream(30);
+    var playing = video.play();
+    if (playing && playing.catch) playing.catch(function () {});
+    raf = requestAnimationFrame(paint);
+
+    return {
+      stream: out,
+      stop: function () {
+        stopped = true;
+        if (raf) cancelAnimationFrame(raf);
+        try { out.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+        try { srcStream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+        try { video.srcObject = null; } catch (e) {}
+      }
+    };
+  }
+
+  /**
+   * Intercept the library's own getUserMedia for one call so it receives the
+   * dual-orientation stream instead of the raw camera.
+   */
+  function installRotationShim() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+    // A native BarcodeDetector reads any orientation already.
+    if ("BarcodeDetector" in window) return;
+
+    var real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    var restored = false;
+    function restore() {
+      if (restored) return;
+      restored = true;
+      navigator.mediaDevices.getUserMedia = real;
+    }
+
+    navigator.mediaDevices.getUserMedia = function (constraints) {
+      return real(constraints).then(function (stream) {
+        restore();
+        var shim = makeDualOrientationStream(stream);
+        if (!shim) return stream;          // unsupported: plain camera
+        rotShim = shim;
+        return shim.stream;
+      }, function (err) { restore(); throw err; });
+    };
+
+    // Never leave the patch installed if start() bails before calling it.
+    setTimeout(restore, 5000);
+  }
+
+  function stopRotationShim() {
+    if (rotShim) { try { rotShim.stop(); } catch (e) {} rotShim = null; }
+  }
+
   function startScan() {
     if (typeof Html5Qrcode === "undefined") {
       status($("scanStatus"),
@@ -736,6 +860,10 @@
         Html5QrcodeSupportedFormats.CODE_128
       ]
     });
+    // Feed the decoder both orientations at once (see the shim above), so a
+    // barcode printed with horizontal bars reads without turning the phone.
+    installRotationShim();
+
     // Asking for 1080p steers phones toward the main rear lens instead of the
     // ultra-wide, whose long minimum focus distance is why close-up barcodes
     // refused to lock. More pixels also let the decoder read a small barcode
@@ -744,16 +872,13 @@
     scanner.start(
       { facingMode: "environment" },
       {
-        // The library CROPS the video to this box before decoding, so whatever
-        // falls outside is never seen. A wide box therefore clipped the ends
-        // off any barcode printed vertically -- common on cans and tubs, and
-        // not fixable by turning the phone, since the box turns with it.
-        // A square takes either orientation. Sized from the live viewfinder so
-        // it scales from a phone to a tablet.
-        qrbox: function (w, h) {
-          var side = Math.round(Math.min(w, h) * 0.7);
-          return { width: side, height: side };
-        },
+        // No qrbox: the shim above feeds a frame containing the camera twice
+        // (upright and rotated), and any crop would slice one copy away. The
+        // decoder gets the whole frame and finds the barcode in whichever
+        // half is oriented so it can read it.
+        //
+        // Dropping the crop also removes the old failure where a box narrower
+        // than the barcode clipped its ends.
         fps: 10,
         videoConstraints: {
           facingMode: "environment",
@@ -860,6 +985,7 @@
   }
 
   function stopScan() {
+    stopRotationShim();
     if ($("zoomRow")) $("zoomRow").classList.add("hidden");
     $("btnScan").classList.remove("hidden");
     $("btnStopScan").classList.add("hidden");
