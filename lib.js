@@ -279,6 +279,513 @@
    * Stores per-serving macros normalized to a per-100g block so the rest of
    * the app can treat recipes and packaged products identically.
    */
+  // ------------------------------------------------- recipe text parsing
+  // A port of keto-recipe-analyzer/scripts/analyze_recipe.py so a recipe can
+  // be analyzed on the phone, offline, from text the user pasted (typically
+  // via iOS Live Text off a cookbook page). The ingredient table lives in
+  // nutrition-db.js, generated from the same nutrition_db.py the script uses.
+  //
+  // Deliberately more forgiving than the Python version: OCR output is messier
+  // than a hand-typed .txt -- vulgar fractions, lines that wrap mid-ingredient,
+  // and parenthetical asides all show up routinely.
+
+  var MASS = { g: 1, gram: 1, grams: 1, kg: 1000,
+               oz: 28.35, ounce: 28.35, ounces: 28.35,
+               lb: 453.6, lbs: 453.6, pound: 453.6, pounds: 453.6 };
+
+  // Keep in step with VOLUME in analyze_recipe.py -- a unit missing here is an
+  // ingredient silently dropped from the totals.
+  var VOLUME = { ml: 1, milliliter: 1, milliliters: 1, l: 1000, liter: 1000, liters: 1000,
+                 tsp: 4.93, teaspoon: 4.93, teaspoons: 4.93,
+                 tbs: 14.79, tbsp: 14.79, tablespoon: 14.79, tablespoons: 14.79,
+                 cup: 236.6, cups: 236.6,
+                 floz: 29.57, fl: 29.57,
+                 pint: 473, pints: 473, quart: 946, quarts: 946, qt: 946 };
+
+  var COUNT_WORDS = ["medium", "large", "small", "clove", "cloves", "can", "cans",
+                     "slice", "slices", "strip", "sprig", "bunch", "stalk",
+                     "stick", "fillet", "breast", "piece", "pieces", "pinch",
+                     "lemon", "head"];
+
+  var WORD_NUM = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5,
+                   six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+                   half: 0.5, quarter: 0.25 };
+
+  // OCR emits real glyphs, not "3/4". Left alone the quantity is dropped and
+  // the ingredient silently becomes a pinch -- a confidently wrong number.
+  var VULGAR = {
+    "\u00bc": "1/4", "\u00bd": "1/2", "\u00be": "3/4",
+    "\u2150": "1/7", "\u2151": "1/9", "\u2152": "1/10",
+    "\u2153": "1/3", "\u2154": "2/3",
+    "\u2155": "1/5", "\u2156": "2/5", "\u2157": "3/5", "\u2158": "4/5",
+    "\u2159": "1/6", "\u215a": "5/6",
+    "\u215b": "1/8", "\u215c": "3/8", "\u215d": "5/8", "\u215e": "7/8"
+  };
+
+  /** Vulgar fractions to ASCII; "1" + U+215B becomes "1 1/8" so it parses. */
+  function normalizeFractions(text) {
+    var out = "";
+    for (var i = 0; i < String(text).length; i++) {
+      var ch = String(text).charAt(i);
+      if (VULGAR[ch]) {
+        if (out && /\d$/.test(out)) out += " ";
+        out += VULGAR[ch];
+      } else if (ch === "\u2044") {
+        out += "/";
+      } else {
+        out += ch;
+      }
+    }
+    return out;
+  }
+
+  var SECTION_STOP = /^\s*(preparation|method|instructions?|directions?|steps?)\b/i;
+  var SECTION_START = /^\s*(ingredients?|for the .+)\s*:?\s*$/i;
+
+  function normalizeUnit(word) {
+    var w = String(word || "").toLowerCase().replace(/^[.,]+|[.,]+$/g, "");
+    if (MASS[w] !== undefined) return { kind: "mass", word: w };
+    if (VOLUME[w] !== undefined) return { kind: "volume", word: w };
+    if (COUNT_WORDS.indexOf(w) !== -1) return { kind: "count", word: w };
+    return null;
+  }
+
+  /** Consume leading numeric tokens: "2", "1/2", "2 1/2", "3.5", "two". */
+  function parseQuantity(tokens) {
+    var amount = 0, used = 0, got = false;
+    for (var i = 0; i < tokens.length; i++) {
+      var low = String(tokens[i]).toLowerCase().replace(/^[.,]+|[.,]+$/g, "");
+      var frac = /^(\d+)\/(\d+)$/.exec(low);
+      if (frac) { amount += Number(frac[1]) / Number(frac[2]); got = true; used++; continue; }
+      if (/^\d+(\.\d+)?$/.test(low)) {
+        if (got) break;        // "2 8 oz" is not 10
+        amount += Number(low); got = true; used++; continue;
+      }
+      if (!got && WORD_NUM[low] !== undefined) {
+        amount += WORD_NUM[low]; got = true; used++; continue;
+      }
+      break;
+    }
+    if (!got) return { amount: null, rest: tokens };
+    return { amount: amount, rest: tokens.slice(used) };
+  }
+
+  // Words that describe a form, not a food. "chili powder" and "baking powder"
+  // share only "powder"; matching on that alone made every unknown "<x> powder"
+  // resolve to baking powder and silently enter the totals with its macros.
+  var GENERIC_WORDS = {
+    powder: 1, extract: 1, fresh: 1, dried: 1, ground: 1, chopped: 1, minced: 1,
+    grated: 1, sliced: 1, whole: 1, raw: 1, cooked: 1, canned: 1, frozen: 1,
+    large: 1, medium: 1, small: 1, plain: 1, pure: 1, light: 1, dark: 1,
+    sauce: 1, juice: 1, oil: 1, syrup: 1, milk: 1, cream: 1, flour: 1,
+    seed: 1, seeds: 1, leaf: 1, leaves: 1, paste: 1, puree: 1, mix: 1,
+    unsalted: 1, salted: 1, sweet: 1, hot: 1, cold: 1, warm: 1, instant: 1
+  };
+
+  /** Fuzzy-match free text to a table key. */
+  function matchIngredient(name, db) {
+    var n = String(name || "").toLowerCase().replace(/[^a-z ]/g, " ")
+              .replace(/\s+/g, " ").trim();
+    if (!n) return null;
+    var words = n.split(" ");
+    var best = null, bestScore = 0;
+    for (var key in db) {
+      if (!Object.prototype.hasOwnProperty.call(db, key)) continue;
+      var cands = [key].concat(db[key].aliases || []);
+      for (var c = 0; c < cands.length; c++) {
+        var cand = cands[c];
+        if (!cand) continue;
+        var cw = cand.split(" ");
+        var score;
+        if (n.indexOf(cand) !== -1) {
+          score = 100 + cand.length;
+        } else {
+          var overlap = 0, specific = 0;
+          for (var k = 0; k < cw.length; k++) {
+            if (words.indexOf(cw[k]) === -1) continue;
+            overlap++;
+            if (!GENERIC_WORDS[cw[k]]) specific++;
+          }
+          // Require at least one word that actually names a food. Without
+          // this, sharing "powder" or "fresh" is enough to claim a match.
+          if (!overlap || !specific) continue;
+          score = 10 * overlap - (cw.length - overlap);
+        }
+        if (score > bestScore) { bestScore = score; best = key; }
+      }
+    }
+    return bestScore > 0 ? best : null;
+  }
+
+  function toGrams(amount, unitKind, unitWord, rec) {
+    rec = rec || {};
+    if (unitKind === "mass") return amount * MASS[unitWord];
+    if (unitKind === "volume") return amount * VOLUME[unitWord] * (rec.density || 1);
+    if (unitKind === "count") {
+      var units = rec.units || {};
+      if (units[unitWord] !== undefined) return amount * units[unitWord];
+      if (units[""] !== undefined) return amount * units[""];
+      return null;
+    }
+    return null;
+  }
+
+  var CONTAINER = /^\s*(\d+)\s+([\d.]+)\s*(oz|ounces?|g|grams?|lb|lbs|pounds?)\.?\s+(cans?|tins?|jars?|packages?|pkgs?|boxes?)\b(.*)/i;
+
+  // Boilerplate that survives extraction from a printed web page: nav, timing
+   // blocks, nutrition panels, pagination, sharing links. Measured across a
+  // 91-recipe corpus, 87% of unmatched lines were this rather than food, so
+  // asking the user to resolve them would bury the few that matter.
+  var PAGE_FURNITURE = new RegExp(
+    "^(" +
+    "at a glance|prep|bake|cook|total|yield|serves?|servings?|makes|" +
+    "print|share|save|pin it|email|shopping list|from our|advertisement|" +
+    "ingredients?|instructions?|directions?|method|preparation|steps?|" +
+    "notes?|tips?|variations?|equipment|before you begin|why this recipe works|" +
+    "nutrition|calories|watch|video|photos?|comments?|reviews?|rate this|" +
+    "updated|published|copyright|all rights reserved" +
+    ")\\b", "i");
+
+  /**
+   * Does this unmatched line deserve the user's attention?
+   *
+   * A silently dropped ingredient makes the totals quietly wrong, so real
+   * misses must surface. But page furniture outnumbers them roughly 7:1, and
+   * a list of "FROM OUR SPONSORS" and "15 mins. to 20 mins." teaches people
+   * to dismiss the whole prompt. Only lines that look like food get through.
+   */
+  function worthAsking(raw) {
+    var t = String(raw || "").trim();
+    if (!t) return false;
+    if (PAGE_FURNITURE.test(t)) return false;
+    if (/^https?:\/\//i.test(t) || /\S+@\S+\.\w/.test(t)) return false;
+    if (/^[_\-=.*\u2022\s]+$/.test(t)) return false;            // rules/dividers
+    if (/\d\s*%\s*DV|\b\d+\s*(mg|mcg|kcal|cal)\b/i.test(t)) return false; // nutrition panel
+    if (/^\d+\s*(of|\/)\s*\d+$/.test(t)) return false;         // "4 of 5", page numbers
+    if (/^\d+[\/.\-]\d+[\/.\-]\d+/.test(t)) return false;      // a date
+    if (/^\d+\s*(mins?|minutes?|hrs?|hours?|seconds?|secs?)\b/i.test(t)) return false;
+    if (/^\d+\s*(degrees?|\u00b0)/i.test(t)) return false;
+    // "58 COMMENTS", "20 Photos - Updated 9 months ago", "6 servings":
+    // a number attached to page metadata, not an amount of food.
+    if (/^\d+\s*(comments?|reviews?|photos?|votes?|ratings?|stars?|likes?|shares?)\b/i.test(t)) return false;
+    if (/^\d+\s*(servings?|serves|portions?)\b/i.test(t)) return false;
+    if (/\bupdated\b|\bago\b|\bposted\b/i.test(t)) return false;
+    // An address written to dodge scrapers: "name (at) example.com".
+    if (/\(at\)|\(dot\)/i.test(t)) return false;
+    // "2. Recipes to Make Now" -- a numbered contents entry. A real
+    // ingredient does not put a period straight after its quantity.
+    if (/^\d+\.\s+[A-Z]/.test(t)) return false;
+    // Mojibake from a broken font encoding ("6RXUFHKWWS..."): English runs
+    // about 35-45% vowels, gibberish far less. Ratio, not position -- an
+    // earlier positional test threw out "2 Tbs. capers, rinsed".
+    var letters = t.replace(/[^A-Za-z]/g, "");
+    if (letters.length > 12) {
+      var vowels = letters.replace(/[^aeiouAEIOU]/g, "").length;
+      if (vowels / letters.length < 0.22) return false;
+    }
+
+    // What remains should read like an ingredient: a quantity, and short.
+    var words = t.split(/\s+/).length;
+    if (words > 14) return false;
+    return /^[\u2022\u00b7\u25cf\u25aa*\-]?\s*(\d|a\s|an\s|one\s|two\s|three\s|half\s)/i
+      .test(normalizeFractions(t));
+  }
+
+  /**
+   * Is this line prose rather than an ingredient?
+   *
+   * Extracted web pages carry headnotes, tips and URLs alongside the list.
+   * The fuzzy matcher will happily find "butter" inside a paragraph about
+   * grating butter and bill it as a 5 g pinch, so every sentence becomes a
+   * phantom ingredient and the totals drift. Ingredient lines are short and
+   * start with a quantity; prose is long and reads like a sentence.
+   */
+  function looksLikeProse(text) {
+    var t = String(text || "").trim();
+    if (!t) return true;
+    if (/^https?:\/\//i.test(t)) return true;             // a bare URL
+    var words = t.split(/\s+/).length;
+    var startsWithQty = /^[\u2022\u00b7\u25cf\u25aa*\-]?\s*(\d|a\s|an\s|one\s|two\s|three\s|half\s)/i
+      .test(normalizeFractions(t));
+    // Generous: a quantity buys a lot of latitude ("1 1/2 cups blueberries
+    // (about 7 1/2 ounces), picked over (see note)" is a real ingredient).
+    if (startsWithQty) return words > 25;
+    // Without a quantity, only a short phrase is plausible ("Dill", "Salt").
+    if (words > 6) return true;
+    // A sentence ending in a period, with a verb-ish shape, is prose.
+    return /[.!?]$/.test(t) && words > 3;
+  }
+
+  /** Parse one ingredient line. Returns null when it isn't one. */
+  function parseIngredientLine(line, db) {
+    db = db || {};
+    var raw = normalizeFractions(String(line || "").trim());
+    if (!raw) return null;
+    raw = raw.replace(/^[\u2022\u00b7\u25cf\u25aa*\-]\s*/, "").trim();
+    if (!raw) return null;
+    if (looksLikeProse(raw)) return null;
+
+    var cm = CONTAINER.exec(raw);
+    if (cm) {
+      var grams = Number(cm[1]) * Number(cm[2]) *
+                  (MASS[cm[3].toLowerCase().replace(/\.$/, "")] || 28.35);
+      var cname = cm[5].replace(/^[\s.,]+|[\s.,]+$/g, "").replace(/^of\s+/i, "");
+      return { raw: raw, amount: grams, unitKind: "mass", unitWord: "g",
+               name: cname, dbKey: matchIngredient(cname, db) };
+    }
+
+    var tokens = raw.replace(/(\d)([a-zA-Z])/g, "$1 $2").split(/\s+/);
+    var q = parseQuantity(tokens);
+    var amount = q.amount, rest = q.rest;
+    var unitKind = null, unitWord = null;
+
+    if (amount === null) {
+      var nu0 = normalizeUnit(tokens[0]);
+      if (nu0 && nu0.kind === "count") {
+        amount = 1; unitKind = nu0.kind; unitWord = nu0.word; rest = tokens.slice(1);
+      } else {
+        rest = tokens;                      // no quantity: "salt to taste"
+      }
+    }
+    if (amount !== null && !unitKind && rest.length) {
+      var nu = normalizeUnit(rest[0]);
+      if (nu) { unitKind = nu.kind; unitWord = nu.word; rest = rest.slice(1); }
+    }
+
+    var name = rest.join(" ").replace(/^[\s.,]+|[\s.,]+$/g, "");
+    if (!name) return null;
+    return { raw: raw, amount: amount, unitKind: unitKind, unitWord: unitWord,
+             name: name, dbKey: matchIngredient(name, db) };
+  }
+
+  // A line that is nothing but a number: "16", "1 1/2", "1/2", "2.5".
+  var QTY_ONLY = /^\s*\d+(\s*\d+\/\d+|\/\d+|\.\d+)?\s*$/;
+
+  // A line that opens with a measurement word. Pairing this with QTY_ONLY is
+  // what separates a real stranded quantity from a date, a page number or a
+  // numbered preparation step -- all of which are also "just a number".
+  var STARTS_WITH_UNIT = new RegExp(
+    "^\\s*(cups?|tablespoons?|teaspoons?|tbsp|tbs|tsp|ounces?|oz|pounds?|lbs?|" +
+    "grams?|g|kg|ml|liters?|l|cloves?|large|medium|small|slices?|cans?|tins?|" +
+    "jars?|sticks?|pints?|quarts?|sprigs?|stalks?|heads?|bunch(es)?|pinch(es)?|" +
+    "strips?|pieces?|fillets?|breasts?|packages?)\\b", "i");
+
+  /**
+   * Rejoin a quantity that print layout stranded on its own line.
+   *
+   * Recipe sites' print CSS lays ingredients out as two columns, and PDF text
+   * extraction reads them top-to-bottom, so "16 tablespoons butter" arrives as
+   * "16" then "tablespoons butter".
+   *
+   * The guard matters: dates ("6/28/2020"), page numbers ("1/6") and numbered
+   * steps ("1" then "Cook the turkey...") are all a bare number too. Requiring
+   * the NEXT line to begin with a unit is what tells them apart -- without it
+   * this would turn preparation steps into ingredients.
+   */
+  function joinStrandedQuantities(lines) {
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var ln = String(lines[i]).trim();
+      var next = i + 1 < lines.length ? String(lines[i + 1]).trim() : "";
+      if (ln && next && QTY_ONLY.test(normalizeFractions(ln)) &&
+          STARTS_WITH_UNIT.test(next)) {
+        out.push(normalizeFractions(ln).trim() + " " + next);
+        i++;                                  // consume the unit line too
+        continue;
+      }
+      out.push(ln);
+    }
+    return out;
+  }
+
+  /**
+   * Join a line that is the tail of the one above: no leading quantity, and
+   * the previous line either dangles on a modifier or this one is an aside.
+   * OCR of a narrow column splits "3 tablespoons good-quality freeze-dried
+   * coffee" in two, and the continuation carries no quantity of its own.
+   */
+  function stitchWrapped(lines) {
+    var DANGLE = /[-,]$|\b(good-quality|fresh|freshly|finely|coarsely|ripe|large|small|medium|of|or|and)$/i;
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var ln = String(lines[i]).trim();
+      var prev = out.length ? out[out.length - 1] : null;
+      var startsWithQty = /^[\u2022\u00b7\u25cf\u25aa*\-]?\s*(\d|a\s|an\s|one\s|two\s|three\s|half\s)/i
+        .test(normalizeFractions(ln));
+      var isAside = /^\(/.test(ln);
+      if (prev && !startsWithQty && (isAside || DANGLE.test(prev))) {
+        out[out.length - 1] = prev.replace(/[-,]$/, "") + " " + ln;
+      } else {
+        out.push(ln);
+      }
+    }
+    return out;
+  }
+
+  /** Pull ingredient lines out of pasted recipe text. */
+  function recipeLines(text) {
+    var lines = String(text || "").split(/\r?\n/);
+    var collecting = false, sawHeader = false, out = [], i, ln;
+
+    for (i = 0; i < lines.length; i++) {
+      ln = lines[i];
+      if (SECTION_STOP.test(ln)) { collecting = false; continue; }
+      if (SECTION_START.test(ln)) { collecting = true; sawHeader = true; continue; }
+      if (collecting && ln.trim()) out.push(ln.trim());
+    }
+
+    // A header is only worth trusting if something followed it. Recipe sites'
+    // print stylesheets often emit the ingredient VALUES at the top of the
+    // document and leave a bare "INGREDIENTS" heading further down, directly
+    // followed by "INSTRUCTIONS" -- so collecting strictly inside the section
+    // yields nothing while the real list sits above, discarded as preamble.
+    if (!sawHeader || !out.length) {
+      out = [];
+      var started = false;
+      for (i = 0; i < lines.length; i++) {
+        ln = lines[i];
+        if (!ln.trim()) continue;
+        if (SECTION_STOP.test(ln)) break;
+        if (!started) { started = true; continue; }   // skip the title
+        out.push(ln.trim());
+      }
+    }
+    return stitchWrapped(joinStrandedQuantities(out));
+  }
+
+  /** First non-empty line, which is the title in every layout we handle. */
+  function recipeTitle(text) {
+    var lines = String(text || "").split(/\r?\n/);
+    for (var i = 0; i < lines.length; i++) {
+      var ln = lines[i].trim();
+      if (ln && !SECTION_START.test(ln)) return ln;
+    }
+    return "";
+  }
+
+  /**
+   * Analyze pasted recipe text against the ingredient table.
+   *
+   * Returns resolved rows AND the lines it could not resolve, because a
+   * dropped ingredient makes the totals quietly wrong -- the caller is
+   * expected to make the user deal with them before saving.
+   */
+  function analyzeRecipeText(text, servings, db) {
+    db = db || {};
+    servings = Number(servings) > 0 ? Number(servings) : 4;
+    var lines = recipeLines(text);
+    var rows = [], unresolved = [];
+    var total = { fat: 0, carb: 0, fiber: 0, protein: 0, grams: 0 };
+
+    for (var i = 0; i < lines.length; i++) {
+      var item = parseIngredientLine(lines[i], db);
+      if (!item) { continue; }
+      var rec = item.dbKey ? db[item.dbKey] : null;
+
+      // Nothing in the table to measure against: the user has to supply it.
+      if (!rec) {
+        unresolved.push({ raw: item.raw, name: item.name, reason: "not-in-table" });
+        continue;
+      }
+
+      var grams = null;
+      if (item.unitKind) {
+        grams = toGrams(item.amount, item.unitKind, item.unitWord, rec);
+      } else if (item.amount !== null) {
+        grams = (rec.units && rec.units[""] !== undefined)
+          ? item.amount * rec.units[""]
+          : item.amount;                 // bare number: treat as grams
+      }
+
+      // "Dill", "Salt to taste" -- a real ingredient with no stated amount.
+      // Matching analyze_recipe.py, assume a 5 g pinch and mark it, rather
+      // than dropping it (which would understate) or demanding a number for
+      // something that genuinely has none.
+      var assumed = false;
+      if (grams === null || !(grams > 0)) {
+        grams = 5;
+        assumed = true;
+      }
+
+      var f = grams / 100;
+      var row = {
+        name: item.name, dbKey: item.dbKey, grams: grams, assumed: assumed,
+        fat: rec.fat * f, carb: rec.carb * f,
+        fiber: rec.fiber * f, protein: rec.protein * f
+      };
+      row.netCarb = netCarbs(row.carb, row.fiber);
+      rows.push(row);
+      total.fat += row.fat; total.carb += row.carb;
+      total.fiber += row.fiber; total.protein += row.protein;
+      total.grams += grams;
+    }
+
+    total.netCarb = netCarbs(total.carb, total.fiber);
+    total.kcal = total.fat * 9 + total.netCarb * 4 + total.protein * 4;
+
+    var per = {};
+    ["fat", "carb", "fiber", "protein", "netCarb", "kcal", "grams"].forEach(function (k) {
+      per[k] = total[k] / servings;
+    });
+
+    // Split the misses: things the user should fix, and noise to ignore.
+    var needsInput = [], ignored = [];
+    for (var u = 0; u < unresolved.length; u++) {
+      (worthAsking(unresolved[u].raw) ? needsInput : ignored).push(unresolved[u]);
+    }
+
+    // When most of what we found is unreadable, the honest answer is "this
+    // didn't work" -- not a hundred questions. A scanned page with a junk
+    // text layer extracts as fragments like "0c/ (D!9", each of which looks
+    // like an unresolved ingredient on its own.
+    var looked = rows.length + needsInput.length;
+    var unusable = looked >= 6 && rows.length / looked < 0.25;
+
+    return {
+      title: recipeTitle(text),
+      servings: servings,
+      rows: rows,
+      unresolved: needsInput,     // what to put in front of the user
+      ignored: ignored,           // page furniture, dropped silently
+      // The caller should ask for the ingredients to be pasted directly
+      // rather than presenting the unresolved list.
+      unusable: unusable,
+      total: total,
+      perServing: per
+    };
+  }
+
+  /** Turn an analyzeRecipeText result into a saveable food record. */
+  function foodFromRecipeAnalysis(a, nameOverride) {
+    if (!a || !(a.perServing.grams > 0)) return null;
+    var name = String(nameOverride || a.title || "Recipe").trim();
+    if (!name) return null;
+    var g = a.perServing.grams;
+    var k = 100 / g;
+    return {
+      id: "recipe:" + name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+      type: "recipe",
+      name: name,
+      brand: "Recipe",
+      code: "",
+      servingGrams: g,
+      servingLabel: "1/" + a.servings + " of recipe (" + Math.round(g) + " g)",
+      per100: {
+        fat: a.perServing.fat * k,
+        carb: a.perServing.carb * k,
+        fiber: a.perServing.fiber * k,
+        protein: a.perServing.protein * k,
+        sugars: 0,
+        kcal: a.perServing.kcal * k
+      },
+      nova: null,
+      additives: [],
+      ingredientsText: a.rows.map(function (r) { return r.name; }).join(", "),
+      flags: scanIngredients(a.rows.map(function (r) { return r.name; }).join(", ")),
+      image: ""
+    };
+  }
+
   function recipeFromAnalyzerJson(json) {
     if (!json || !json.per_serving) throw new Error("Not analyzer JSON: missing per_serving");
     var ps = json.per_serving;
@@ -864,6 +1371,17 @@
     estimateKcal: estimateKcal,
     dailyTotals: dailyTotals,
     recipeFromAnalyzerJson: recipeFromAnalyzerJson,
+    normalizeFractions: normalizeFractions,
+    parseIngredientLine: parseIngredientLine,
+    matchIngredient: matchIngredient,
+    toGrams: toGrams,
+    recipeLines: recipeLines,
+    looksLikeProse: looksLikeProse,
+    worthAsking: worthAsking,
+    joinStrandedQuantities: joinStrandedQuantities,
+    recipeTitle: recipeTitle,
+    analyzeRecipeText: analyzeRecipeText,
+    foodFromRecipeAnalysis: foodFromRecipeAnalysis,
     foodFromProduct: foodFromProduct,
     foodWithEdits: foodWithEdits,
     pendingProductFood: pendingProductFood,

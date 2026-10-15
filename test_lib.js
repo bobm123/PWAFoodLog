@@ -216,6 +216,169 @@ ok("no servings -> plain serving label",
    L.recipeFromAnalyzerJson({ title: "X", per_serving: { grams: 100, fat: 1, carb: 1, fiber: 0, protein: 1, kcal: 17 } })
      .servingLabel === "1 serving (100 g)");
 
+console.log("\n-- recipe text parsing (OCR-tolerant) --");
+const NDB = require("./nutrition-db.js").DB;
+
+// Vulgar fractions: iOS Live Text emits these, and dropping one turns a
+// quantity into a 5 g pinch -- a confidently wrong number, not a visible error.
+ok("bare vulgar fraction", L.normalizeFractions("\u00be cup sugar") === "3/4 cup sugar",
+   L.normalizeFractions("\u00be cup sugar"));
+ok("mixed number keeps a space", L.normalizeFractions("1\u215b ounces") === "1 1/8 ounces",
+   L.normalizeFractions("1\u215b ounces"));
+ok("fraction slash normalized", L.normalizeFractions("1\u20442") === "1/2",
+   L.normalizeFractions("1\u20442"));
+ok("plain text untouched", L.normalizeFractions("2 large eggs") === "2 large eggs");
+
+// The quantity must actually survive into grams.
+const sugarLine = L.parseIngredientLine("\u00be cup sugar", NDB);
+ok("vulgar fraction yields an amount", sugarLine.amount === 0.75, sugarLine.amount);
+ok("unit recognised", sugarLine.unitKind === "volume" && sugarLine.unitWord === "cup");
+ok("matched to the table", sugarLine.dbKey === "sugar", sugarLine.dbKey);
+
+// "tbs" is in analyze_recipe.py; omitting it silently dropped almond flour.
+const tbs = L.parseIngredientLine("3 tbs. almond flour", NDB);
+ok("'tbs.' is a volume unit", tbs.unitKind === "volume", tbs.unitKind + "/" + tbs.unitWord);
+ok("almond flour resolves", tbs.dbKey === "almond flour", tbs.dbKey);
+
+// OCR wraps a narrow column mid-ingredient; the tail has no quantity.
+const wrapped = L.recipeLines([
+  "Title",
+  "3 tablespoons good-quality",
+  "freeze-dried coffee",
+  "2 large eggs"
+].join("\n"));
+ok("wrapped line is stitched", wrapped[0] === "3 tablespoons good-quality freeze-dried coffee",
+   JSON.stringify(wrapped[0]));
+ok("next ingredient stays separate", wrapped[1] === "2 large eggs", JSON.stringify(wrapped[1]));
+
+const aside = L.recipeLines(["Title", "4 original Heath Bars", "(1 1/8 ounces each)"].join("\n"));
+ok("parenthetical aside joins the line above",
+   aside.length === 1 && /Heath Bars \(1 1\/8 ounces each\)/.test(aside[0]), JSON.stringify(aside));
+
+// Bullets from a scraped page.
+const bullets = L.recipeLines(["Title", "\u2022 2 large eggs", "\u2022 1 cup milk"].join("\n"));
+ok("bulleted lines are kept", bullets.length === 2, JSON.stringify(bullets));
+const bulletItem = L.parseIngredientLine("\u2022 2 large eggs", NDB);
+ok("bullet stripped before parsing", bulletItem.dbKey === "egg", bulletItem.dbKey);
+
+// Full analysis must match analyze_recipe.py, which is the reference.
+const FISHCAKES = [
+  "Keto Savory Sardine Cakes",
+  "",
+  "Ingredients:",
+  "2 8 oz. cans of sardines",
+  "3 eggs",
+  "1 medium Onion",
+  "3 tbs. almond flour",
+  "Dill",
+  "",
+  "Preparation:",
+  "Mix and fry."
+].join("\n");
+const fc = L.analyzeRecipeText(FISHCAKES, 4, NDB);
+ok("title read from the first line", fc.title === "Keto Savory Sardine Cakes", fc.title);
+ok("prep section ignored", fc.rows.every(r => !/mix and fry/i.test(r.name)));
+ok("nothing unresolved in a clean recipe", fc.unresolved.length === 0,
+   JSON.stringify(fc.unresolved));
+ok("quantity-less ingredient is assumed, not dropped",
+   fc.rows.some(r => r.name === "Dill" && r.assumed === true),
+   JSON.stringify(fc.rows.map(r => r.name)));
+
+// An ingredient the table doesn't know must surface, not vanish: a silent
+// drop is what makes the per-serving numbers quietly wrong.
+const HEATH = [
+  "Coffee Heath Bar Crunch",
+  "4 original Heath Bars",
+  "2 large eggs",
+  "\u00be cup sugar"
+].join("\n");
+const h = L.analyzeRecipeText(HEATH, 8, NDB);
+ok("unknown ingredient is reported", h.unresolved.length === 1, JSON.stringify(h.unresolved));
+ok("reported with a reason", h.unresolved[0].reason === "not-in-table", h.unresolved[0].reason);
+ok("known ingredients still counted", h.rows.length === 2, h.rows.length);
+ok("sugar counted by volume, not as a pinch",
+   h.rows.some(r => r.dbKey === "sugar" && r.grams > 100),
+   JSON.stringify(h.rows.map(r => r.dbKey + ":" + Math.round(r.grams))));
+
+// Saveable record.
+const rfood = L.foodFromRecipeAnalysis(fc);
+ok("recipe food has an id", /^recipe:/.test(rfood.id), rfood.id);
+ok("serving label names the fraction", /^1\/4 of recipe/.test(rfood.servingLabel), rfood.servingLabel);
+ok("per100 is derived from the serving", rfood.per100.protein > 0);
+ok("name can be overridden",
+   L.foodFromRecipeAnalysis(fc, "My Cakes").name === "My Cakes");
+ok("empty analysis yields nothing", L.foodFromRecipeAnalysis(null) === null);
+
+
+console.log("\n-- unresolved gate (what to ask the user) --");
+// Across a 91-recipe corpus, ~90% of unmatched lines were page furniture.
+// Listing those would bury the few real misses, so only food-shaped lines
+// reach the user.
+[
+  "1/4 cup mirin",
+  "2 Tbs. capers, rinsed",
+  "3 quarts water",
+  "1 lemon grass stalk, smashed",
+  "1 (21 ounce) can cherry pie filling",
+  "4 radishes, trimmed and sliced thin"
+].forEach(function (t) {
+  ok("asks about: " + t.slice(0, 34), L.worthAsking(t) === true, t);
+});
+
+[
+  "AT A GLANCE", "PREP", "FROM OUR SPONSORS", "15 mins. to 20 mins.",
+  "58 COMMENTS", "20 Photos \u00b7 Updated 9 months ago", "6 servings",
+  "4 of 5", "77mg", "12%DV", "294kcal", "2/1/14, 3:45 PM",
+  "____________", "http://example.com/recipe", "cook (at) example.com",
+  "6RXUFHKWWSGHHSVRXWKGLVKFRP", "2. Recipes to Make Now"
+].forEach(function (t) {
+  ok("ignores: " + t.slice(0, 34), L.worthAsking(t) === false, t);
+});
+
+// A generic modifier must not be enough to claim a match: sharing "powder"
+// once made every unknown "<x> powder" resolve to baking powder and quietly
+// contribute its macros.
+["chili powder", "wasabi powder", "protein powder", "curry powder"].forEach(function (t) {
+  ok("no false match: " + t, L.matchIngredient(t, NDB) === null, L.matchIngredient(t, NDB));
+});
+["baking powder", "cocoa powder", "vanilla extract", "ice water", "dried oregano"]
+  .forEach(function (t) {
+    ok("still matches: " + t, !!L.matchIngredient(t, NDB), t);
+  });
+
+// Ingredients the corpus asked for most often.
+["water", "vanilla extract", "baking soda", "baking powder", "yeast",
+ "oregano", "basil", "ginger", "nutmeg", "buttermilk"].forEach(function (k) {
+  ok("table has " + k, !!NDB[k], k);
+});
+
+// Garbage in, honest answer out: a scanned page with a junk text layer
+// extracts as fragments, each looking like an unresolved ingredient. Better
+// to say "couldn't read this" than to ask a hundred questions.
+const JUNK = ["Recipe", "0c/ (D!9", "0q", "3.X0a", "30(D", "3<", "0)qJ", "9aF.",
+              "3E-.P", "1- -_!v"].join("\n");
+const junkResult = L.analyzeRecipeText(JUNK, 4, NDB);
+ok("junk text flagged unusable", junkResult.unusable === true,
+   junkResult.rows.length + " resolved / " + junkResult.unresolved.length + " asked");
+
+const CLEAN = ["Scones", "2 cups flour", "1/2 cup sugar", "2 large eggs",
+               "1 cup milk", "1/2 teaspoon salt", "2 teaspoons baking powder"].join("\n");
+const cleanResult = L.analyzeRecipeText(CLEAN, 8, NDB);
+ok("a clean recipe is not flagged", cleanResult.unusable === false);
+ok("clean recipe resolves everything", cleanResult.unresolved.length === 0,
+   JSON.stringify(cleanResult.unresolved));
+
+// Furniture is dropped, not silently counted as food.
+const NOISY = ["Biscuits", "AT A GLANCE", "PREP", "20 mins.", "2 cups flour",
+               "FROM OUR SHOP", "1/2 cup butter"].join("\n");
+const noisy = L.analyzeRecipeText(NOISY, 4, NDB);
+ok("furniture goes to ignored", noisy.ignored.length > 0, noisy.ignored.length);
+ok("furniture is not asked about", noisy.unresolved.length === 0,
+   JSON.stringify(noisy.unresolved));
+ok("real ingredients still resolve", noisy.rows.length === 2,
+   JSON.stringify(noisy.rows.map(function (r) { return r.dbKey; })));
+
+
 console.log("\n-- foodWithEdits --");
 const EDIT_BASE = {
   id: "product:1", type: "product", name: "Original Sauce", brand: "", code: "1",
