@@ -23,6 +23,20 @@ fetch "$LIB" vendor/html5-qrcode.min.js
 echo "Fetching $LIC"
 fetch "$LIC" vendor/html5-qrcode-LICENSE.txt
 
+# --- local patch -------------------------------------------------------
+# html5-qrcode hardcodes ZXing's TRY_HARDER hint to false, and ZXing only
+# rotates the image when that hint is on. Without it only barcodes whose bars
+# run vertically decode -- a can held the "wrong" way never scans. Flip the
+# one flag; nothing else about the library changes.
+if grep -q "TRY_HARDER,!1" vendor/html5-qrcode.min.js; then
+  sed -i.bak "s/TRY_HARDER,!1/TRY_HARDER,!0/" vendor/html5-qrcode.min.js
+  rm -f vendor/html5-qrcode.min.js.bak
+  echo "Patched TRY_HARDER -> true (reads barcodes in any orientation)."
+else
+  echo "WARNING: TRY_HARDER flag not found - upstream may have changed." >&2
+  echo "         Barcodes with horizontal bars will not scan." >&2
+fi
+
 echo
 echo "Vendored:"
 echo "  vendor/html5-qrcode.min.js        $(wc -c < vendor/html5-qrcode.min.js) bytes"

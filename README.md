@@ -209,6 +209,14 @@ Commit the vendored file — a deployed copy without it silently falls back to t
 After vendoring, the only external calls left are the Open Food Facts barcode
 lookup and name search.
 
+**The vendored copy carries a one-byte patch.** html5-qrcode hardcodes ZXing's
+`TRY_HARDER` hint to `false`, and ZXing only rotates the image when that hint is
+on — so without it, only barcodes whose bars run *vertically* decode, and a can
+held the "wrong" way never scans. `fetch-vendor.sh` / `.ps1` flip the flag after
+downloading and warn if upstream renames it. Nothing else about the library is
+changed. This is also why the CDN fallback is a last resort: the unpatched CDN
+build cannot read a horizontally-printed barcode.
+
 ## Deploying (required for camera scanning)
 
 iOS Safari only grants camera access over **HTTPS** (or `localhost`). Any free
