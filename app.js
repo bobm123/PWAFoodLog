@@ -1573,21 +1573,208 @@
     });
   }
 
-  function importRecipe() {
-    var raw = $("recipeJson").value.trim();
-    if (!raw) return;
-    var parsed;
-    try { parsed = JSON.parse(raw); }
-    catch (e) { status($("importStatus"), "That isn't valid JSON.", "err"); return; }
-    var food;
-    try { food = L.recipeFromAnalyzerJson(parsed); }
-    catch (e) { status($("importStatus"), e.message, "err"); return; }
+  // --------------------------------------------------------- recipe import
+  // Holds the last analysis so the Save button can act on it without
+  // re-parsing, and so grams typed for unresolved lines survive a redraw.
+  var recipeAnalysis = null;
+  var recipeFixes = {};        // index in analysis.unresolved -> grams | "skip"
+
+  /**
+   * Analyze whatever is in the box. Accepts analyzer JSON as well as plain
+   * recipe text, because the companion tool's output is a perfectly good
+   * thing to paste and asking the user which kind they have is noise.
+   */
+  function analyzeRecipe() {
+    var raw = $("recipeText").value.trim();
+    recipeAnalysis = null;
+    recipeFixes = {};
+    $("recipeReview").innerHTML = "";
+    if (!raw) { status($("importStatus"), "Paste a recipe first.", "err"); return; }
+
+    // JSON from analyze_recipe.py --json: import it directly, nothing to resolve.
+    if (raw.charAt(0) === "{") {
+      var parsed, food;
+      try { parsed = JSON.parse(raw); }
+      catch (e) { status($("importStatus"), "That looks like JSON but won't parse.", "err"); return; }
+      try { food = L.recipeFromAnalyzerJson(parsed); }
+      catch (e) { status($("importStatus"), e.message, "err"); return; }
+      food.id = food.id + ":" + Date.now();
+      S.put("foods", food).then(function () {
+        $("recipeText").value = "";
+        status($("importStatus"), "", "");
+        toast("Saved " + food.name);
+        renderFoods();
+      });
+      return;
+    }
+
+    var servings = parseInt($("recipeServings").value, 10);
+    if (!(servings > 0)) { status($("importStatus"), "Enter how many servings it makes.", "err"); return; }
+
+    var a = L.analyzeRecipeText(raw, servings, NutritionDB.DB);
+
+    // Nothing usable came out -- say so plainly rather than listing dozens of
+    // fragments. This is what a scanned page with a junk text layer produces.
+    if (a.unusable || (!a.rows.length && !a.unresolved.length)) {
+      status($("importStatus"), "", "");
+      $("recipeReview").innerHTML =
+        '<div class="rvbox">' +
+          "<h3>Couldn't read the ingredients</h3>" +
+          '<p class="hint">Nothing in that text looked like an ingredient list. ' +
+          "Paste just the ingredients - one per line, each starting with its " +
+          "amount, like <em>2 cups flour</em>.</p>" +
+        "</div>";
+      return;
+    }
+
+    recipeAnalysis = a;
+    status($("importStatus"), "", "");
+    renderRecipeReview();
+  }
+
+  /** The review step: totals, anything that needs a number, and Save. */
+  function renderRecipeReview() {
+    var a = recipeAnalysis;
+    if (!a) { $("recipeReview").innerHTML = ""; return; }
+
+    var per = effectivePerServing();
+    var unresolvedLeft = a.unresolved.filter(function (u, i) {
+      return recipeFixes[i] === undefined;
+    }).length;
+
+    var head =
+      '<div class="rvhead">' +
+        "<b>" + esc(a.title || "Untitled recipe") + "</b>" +
+        '<span class="sub">' + a.servings + " serving" + (a.servings === 1 ? "" : "s") +
+          " &middot; " + fmt(per.netCarb, 1) + " g net carbs each</span>" +
+      "</div>";
+
+    var totals =
+      '<div class="fdetail">' +
+        '<div class="drow"><span class="dk">Calories</span><span class="dv">' +
+          fmt(per.kcal, 0) + " kcal</span></div>" +
+        '<div class="drow"><span class="dk">Net carbs</span><span class="dv"><b>' +
+          fmt(per.netCarb, 1) + " g</b></span></div>" +
+        '<div class="drow"><span class="dk">Fat</span><span class="dv">' +
+          fmt(per.fat, 1) + " g</span></div>" +
+        '<div class="drow"><span class="dk">Protein</span><span class="dv">' +
+          fmt(per.protein, 1) + " g</span></div>" +
+        '<div class="drow"><span class="dk">Serving</span><span class="dv">' +
+          fmt(per.grams, 0) + " g</span></div>" +
+      "</div>";
+
+    // Each unresolved line needs a weight or an explicit skip. Leaving them
+    // out silently is what makes a recipe's totals quietly wrong.
+    var asks = "";
+    if (a.unresolved.length) {
+      asks = '<p class="missnote">&#9432; ' + a.unresolved.length + " line" +
+             (a.unresolved.length === 1 ? "" : "s") +
+             " couldn't be matched to the food table. Give a total weight, or skip" +
+             " to leave it out of the macros.</p>" +
+        a.unresolved.map(function (u, i) {
+          var fix = recipeFixes[i];
+          var done = fix !== undefined;
+          return '<div class="rvfix' + (done ? " done" : "") + '">' +
+            '<div class="rvraw">' + esc(u.raw) + "</div>" +
+            (done
+              ? '<div class="rvstate">' +
+                  (fix === "skip" ? "left out" : fmt(fix, 0) + " g") +
+                  ' <button class="linkish" data-unfix="' + i + '">change</button></div>'
+              : '<div class="row">' +
+                  '<input class="rvgrams" id="rvg' + i + '" type="number" step="any" ' +
+                    'inputmode="decimal" placeholder="grams">' +
+                  '<button class="ghost tiny" data-fixgrams="' + i + '">Use</button>' +
+                  '<button class="ghost tiny" data-skipline="' + i + '">Skip</button>' +
+                "</div>") +
+          "</div>";
+        }).join("");
+    }
+
+    var ing = a.rows.length
+      ? '<details class="rving"><summary>' + a.rows.length + " resolved ingredient" +
+        (a.rows.length === 1 ? "" : "s") + "</summary>" +
+        a.rows.map(function (r) {
+          return '<div class="drow"><span class="dk">' + esc(r.name) +
+            (r.assumed ? " *" : "") + '</span><span class="dv">' +
+            fmt(r.grams, 0) + " g</span></div>";
+        }).join("") +
+        (a.rows.some(function (r) { return r.assumed; })
+          ? '<p class="hint">* no amount given; a small pinch was assumed.</p>' : "") +
+        "</details>"
+      : "";
+
+    $("recipeReview").innerHTML =
+      '<div class="rvbox">' + head + totals + asks + ing +
+        '<div class="row" style="margin-top:.6rem">' +
+          '<button id="btnSaveRecipe" class="primary"' +
+            (unresolvedLeft ? " disabled" : "") + ">Save recipe</button>" +
+          '<button id="btnCancelRecipe" class="ghost">Cancel</button>' +
+        "</div>" +
+        (unresolvedLeft
+          ? '<p class="hint">Handle the ' + unresolvedLeft + " line" +
+            (unresolvedLeft === 1 ? "" : "s") + " above to save.</p>"
+          : "") +
+      "</div>";
+  }
+
+  /**
+   * Per-serving macros including any weights the user supplied for lines the
+   * table couldn't match. Those have no nutrition data of their own, so they
+   * add grams (affecting serving size) but no macros -- which is honest:
+   * we know how much went in, not what was in it.
+   */
+  function effectivePerServing() {
+    var a = recipeAnalysis;
+    var extra = 0;
+    for (var k in recipeFixes) {
+      if (!Object.prototype.hasOwnProperty.call(recipeFixes, k)) continue;
+      var v = recipeFixes[k];
+      if (v !== "skip" && v > 0) extra += v;
+    }
+    var per = {};
+    ["fat", "carb", "fiber", "protein", "netCarb", "kcal", "grams"].forEach(function (key) {
+      per[key] = a.perServing[key];
+    });
+    per.grams += extra / a.servings;
+    return per;
+  }
+
+  function saveRecipe() {
+    var a = recipeAnalysis;
+    if (!a) return;
+    var per = effectivePerServing();
+    var food = L.foodFromRecipeAnalysis(a);
+    if (!food) { status($("importStatus"), "Couldn't build a recipe from that.", "err"); return; }
+
+    // Re-derive per100 from the effective serving weight so added grams from
+    // unmatched ingredients dilute the macros rather than being ignored.
+    if (per.grams > 0) {
+      var k = 100 / per.grams;
+      food.servingGrams = per.grams;
+      food.servingLabel = "1/" + a.servings + " of recipe (" + Math.round(per.grams) + " g)";
+      food.per100 = {
+        fat: per.fat * k, carb: per.carb * k, fiber: per.fiber * k,
+        protein: per.protein * k, sugars: 0, kcal: per.kcal * k
+      };
+    }
     food.id = food.id + ":" + Date.now();
+
     S.put("foods", food).then(function () {
-      $("recipeJson").value = "";
-      status($("importStatus"), "Imported “" + food.name + "”.", "ok");
+      recipeAnalysis = null;
+      recipeFixes = {};
+      $("recipeText").value = "";
+      $("recipeReview").innerHTML = "";
+      searchIndex = null;
+      toast("Saved " + food.name);
       renderFoods();
     });
+  }
+
+  function cancelRecipe() {
+    recipeAnalysis = null;
+    recipeFixes = {};
+    $("recipeReview").innerHTML = "";
+    status($("importStatus"), "", "");
   }
 
   function logFood(id) {
@@ -2119,7 +2306,7 @@
       });
     });
     $("btnQuickAdd").addEventListener("click", submitQuickAdd);
-    $("btnImportRecipe").addEventListener("click", importRecipe);
+    $("btnAnalyzeRecipe").addEventListener("click", analyzeRecipe);
     $("btnSaveSettings").addEventListener("click", saveSettings);
     if ($("btnCheckUpdate")) $("btnCheckUpdate").addEventListener("click", checkForUpdate);
     if ($("foodSort")) {
@@ -2158,6 +2345,21 @@
       if (!b) return;
       if (b.dataset.del) S.del("entries", Number(b.dataset.del)).then(renderToday);
       else if (b.dataset.delfood) S.del("foods", b.dataset.delfood).then(renderFoods);
+      else if (b.id === "btnSaveRecipe") saveRecipe();
+      else if (b.id === "btnCancelRecipe") cancelRecipe();
+      else if (b.dataset.fixgrams !== undefined) {
+        var gi = Number(b.dataset.fixgrams);
+        var gv = parseFloat(($("rvg" + gi) || {}).value);
+        if (gv > 0) { recipeFixes[gi] = gv; renderRecipeReview(); }
+      }
+      else if (b.dataset.skipline !== undefined) {
+        recipeFixes[Number(b.dataset.skipline)] = "skip";
+        renderRecipeReview();
+      }
+      else if (b.dataset.unfix !== undefined) {
+        delete recipeFixes[Number(b.dataset.unfix)];
+        renderRecipeReview();
+      }
       else if (b.dataset.editfood) startEditFood(b.dataset.editfood);
       else if (b.dataset.savefood) saveFoodEdits(b.dataset.savefood);
       else if (b.dataset.cancelfoodedit) cancelEditFood();

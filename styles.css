@@ -395,3 +395,25 @@ a.btnlink{
 }
 a.btnlink.tiny{padding:.3rem .5rem;font-size:.75rem}
 a.btnlink:hover{border-color:var(--green);color:var(--green)}
+
+/* ---- recipe paste + review ---- */
+.svglabel{font-size:.8rem;color:var(--dim)}
+.rvbox{
+  margin-top:.7rem;padding-top:.6rem;border-top:1px solid var(--line);
+}
+.rvbox h3{margin:0 0 .3rem;font-size:.95rem}
+.rvhead b{display:block;font-size:.95rem}
+.rvhead .sub{display:block;font-size:.78rem;color:var(--dim);margin-top:.1rem}
+.rvfix{
+  margin:.5rem 0;padding:.5rem .6rem;border:1px solid var(--line);
+  border-radius:8px;background:#0d100f;
+}
+.rvfix.done{opacity:.65}
+.rvraw{font-size:.82rem;margin-bottom:.35rem;line-height:1.3}
+.rvstate{font-size:.8rem;color:var(--dim)}
+.rvgrams{
+  width:6.5rem;background:#0d100f;color:var(--fg);border:1px solid var(--line);
+  border-radius:8px;padding:.3rem .45rem;font:inherit;font-size:.82rem;
+}
+.rving{margin-top:.5rem;font-size:.82rem}
+.rving summary{color:var(--green);cursor:pointer;font-weight:600;padding:.2rem 0}

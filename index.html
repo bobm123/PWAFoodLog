@@ -178,14 +178,22 @@
     </div>
 
     <div class="card">
-      <h2>Import from the recipe analyzer</h2>
+      <h2>Add a recipe</h2>
       <p class="hint">
-        Paste the output of
-        <code>analyze_recipe.py &lt;recipe.txt&gt; --json</code>.
+        Paste a recipe&rsquo;s ingredients and the app works out the macros on this
+        device. On an iPhone, point the Camera at a cookbook page, tap the
+        text-selection icon, copy, and paste here. Analyzer JSON works too.
       </p>
-      <textarea id="recipeJson" rows="5" placeholder='{"title":"Keto Savory Sardine Cakes", ...}'></textarea>
-      <button id="btnImportRecipe" class="primary">Import recipe</button>
+      <textarea id="recipeText" rows="6"
+        placeholder="Coffee Heath Bar Crunch&#10;2 large eggs&#10;3/4 cup sugar&#10;2 cups heavy cream&#10;1 cup milk"></textarea>
+      <div class="row" style="align-items:center;gap:.6rem">
+        <label class="svglabel" for="recipeServings">Servings</label>
+        <input id="recipeServings" type="number" min="1" step="1" value="4"
+               inputmode="numeric" style="width:5rem">
+        <button id="btnAnalyzeRecipe" class="primary">Analyze</button>
+      </div>
       <p class="status" id="importStatus"></p>
+      <div id="recipeReview"></div>
     </div>
   </section>
 
@@ -366,6 +374,7 @@
 <script src="vendor/html5-qrcode.min.js"
         onerror="var s=document.createElement('script');s.src='https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';s.async=false;document.head.appendChild(s);"></script>
 <script src="lib.js"></script>
+<script src="nutrition-db.js"></script>
 <script src="store.js"></script>
 <script src="app.js"></script>
 </body>
