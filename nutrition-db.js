@@ -787,6 +787,23 @@
       "protein": 0.3,
       "units": {}
     },
+    "instant coffee": {
+      "aliases": [
+        "freeze-dried coffee",
+        "freeze dried coffee",
+        "coffee granules",
+        "espresso powder",
+        "coffee powder"
+      ],
+      "carb": 41.1,
+      "density": 0.135,
+      "fat": 0.5,
+      "fiber": 0.0,
+      "protein": 12.2,
+      "units": {
+        "": 2.0
+      }
+    },
     "kale": {
       "aliases": [],
       "carb": 8.8,
@@ -1427,6 +1444,26 @@
         "medium": 130.0
       }
     },
+    "toffee candy bar": {
+      "aliases": [
+        "heath bar",
+        "heath bars",
+        "toffee bar",
+        "toffee bars",
+        "toffee",
+        "skor bar",
+        "english toffee"
+      ],
+      "carb": 61.5,
+      "density": 1.0,
+      "fat": 33.3,
+      "fiber": 0.8,
+      "protein": 2.6,
+      "units": {
+        "": 39.0,
+        "bar": 39.0
+      }
+    },
     "tofu": {
       "aliases": [],
       "carb": 1.9,
@@ -1664,6 +1701,7 @@
     "rice": "Swap for cauliflower rice (about 3 g net carbs per cup vs ~45 g).",
     "sugar": "Replace with erythritol, allulose, or monk fruit sweetener (zero net carbs).",
     "sweet potato": "Swap for mashed cauliflower or roasted turnip / radish.",
+    "toffee candy bar": "Mostly sugar and butter - use a sugar-free chocolate or a few chopped nuts for crunch instead.",
     "tortilla": "Swap for a low-carb tortilla or a large lettuce leaf.",
     "yogurt": "Use full-fat Greek yogurt or sour cream instead of regular yogurt to cut carbs and raise the fat ratio."
   };

@@ -14,7 +14,7 @@
   // App version, shown in Settings -> About. This is the single source of
   // truth: sw.js builds its cache name from it, so bumping this is what makes
   // installed copies pick up a new release. Bump it on every deploy.
-  var APP_VERSION = "1.0.9";
+  var APP_VERSION = "1.1.0";
 
   // ---------------------------------------------------------------------
   // High-glycemic / refined-carb ingredient watchlist.
@@ -516,6 +516,27 @@
     return /[.!?]$/.test(t) && words > 3;
   }
 
+  // "(1 1/8 ounces each)", "(14 oz each)", "(400 g each)" -- a per-item size
+  // stated in the line itself.
+  var EACH_SIZE = /\((?:about\s+)?([\d.]+(?:\s+\d+\/\d+)?|\d+\/\d+)\s*(oz|ounces?|g|grams?|lb|lbs|pounds?)\.?\s*(?:each|apiece)\)/i;
+
+  /**
+   * A per-item weight the recipe states for itself, in grams, or null.
+   *
+   * "4 original Heath Bars (1 1/8 ounces each)" is 127.6 g, but the table's
+   * generic bar is 39 g, so trusting the table would overstate it by 22%.
+   * When the line says how big each one is, that beats any default.
+   */
+  function eachSizeGrams(text) {
+    var m = EACH_SIZE.exec(normalizeFractions(String(text || "")));
+    if (!m) return null;
+    var qty = parseQuantity(m[1].trim().split(/\s+/));
+    if (qty.amount === null || !(qty.amount > 0)) return null;
+    var unit = normalizeUnit(m[2]);
+    if (!unit || unit.kind !== "mass") return null;
+    return qty.amount * MASS[unit.word];
+  }
+
   /** Parse one ingredient line. Returns null when it isn't one. */
   function parseIngredientLine(line, db) {
     db = db || {};
@@ -689,7 +710,11 @@
       }
 
       var grams = null;
-      if (item.unitKind) {
+      // A size the line states for each item wins over the table's default.
+      var each = eachSizeGrams(item.raw);
+      if (each !== null && item.amount !== null && !item.unitKind) {
+        grams = item.amount * each;
+      } else if (item.unitKind) {
         grams = toGrams(item.amount, item.unitKind, item.unitWord, rec);
       } else if (item.amount !== null) {
         grams = (rec.units && rec.units[""] !== undefined)
@@ -1375,6 +1400,7 @@
     parseIngredientLine: parseIngredientLine,
     matchIngredient: matchIngredient,
     toGrams: toGrams,
+    eachSizeGrams: eachSizeGrams,
     recipeLines: recipeLines,
     looksLikeProse: looksLikeProse,
     worthAsking: worthAsking,

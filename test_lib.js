@@ -285,10 +285,11 @@ ok("quantity-less ingredient is assumed, not dropped",
    JSON.stringify(fc.rows.map(r => r.name)));
 
 // An ingredient the table doesn't know must surface, not vanish: a silent
-// drop is what makes the per-serving numbers quietly wrong.
+// drop is what makes the per-serving numbers quietly wrong. (Heath bars were
+// the example here until they were added to the table.)
 const HEATH = [
   "Coffee Heath Bar Crunch",
-  "4 original Heath Bars",
+  "4 sprigs galangal root",
   "2 large eggs",
   "\u00be cup sugar"
 ].join("\n");
@@ -308,6 +309,36 @@ ok("per100 is derived from the serving", rfood.per100.protein > 0);
 ok("name can be overridden",
    L.foodFromRecipeAnalysis(fc, "My Cakes").name === "My Cakes");
 ok("empty analysis yields nothing", L.foodFromRecipeAnalysis(null) === null);
+
+
+console.log("\n-- stated per-item sizes --");
+// "4 Heath Bars (1 1/8 ounces each)" is 128 g, but the table's generic bar is
+// 39 g -- trusting the table overstates it by 22%. A size the line states for
+// itself always wins.
+ok("ounces each", Math.abs(L.eachSizeGrams("4 original Heath Bars (1 1/8 ounces each)") - 31.9) < 0.5,
+   L.eachSizeGrams("4 original Heath Bars (1 1/8 ounces each)"));
+ok("oz each", Math.abs(L.eachSizeGrams("2 cans (14 oz each) tomatoes") - 396.9) < 0.5);
+ok("grams each", L.eachSizeGrams("3 bars (50 g each) chocolate") === 50);
+ok("no 'each' means no per-item size", L.eachSizeGrams("2 cans (14 oz) tomatoes") === null);
+ok("plain count is unaffected", L.eachSizeGrams("4 Heath Bars") === null);
+ok("a volume is unaffected", L.eachSizeGrams("1 1/2 cups flour") === null);
+
+const BARS = L.analyzeRecipeText(
+  ["Candy", "4 original Heath Bars (1 1/8 ounces each)"].join("\n"), 1, NDB);
+ok("stated size beats the table default",
+   Math.abs(BARS.rows[0].grams - 127.6) < 1, BARS.rows[0] && BARS.rows[0].grams);
+
+// Ingredients the Heath Bar page needed.
+ok("table knows toffee bars", L.matchIngredient("Heath Bars", NDB) === "toffee candy bar",
+   L.matchIngredient("Heath Bars", NDB));
+ok("table knows instant coffee",
+   L.matchIngredient("freeze-dried coffee", NDB) === "instant coffee",
+   L.matchIngredient("freeze-dried coffee", NDB));
+// Granules are light; a water-like density would turn 3 tbsp into ~44 g.
+const COFFEE = L.analyzeRecipeText(
+  ["X", "3 tablespoons freeze-dried coffee"].join("\n"), 1, NDB);
+ok("instant coffee uses a granule density",
+   COFFEE.rows[0].grams < 10, COFFEE.rows[0] && COFFEE.rows[0].grams);
 
 
 console.log("\n-- unresolved gate (what to ask the user) --");
