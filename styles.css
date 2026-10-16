@@ -417,3 +417,16 @@ a.btnlink:hover{border-color:var(--green);color:var(--green)}
 }
 .rving{margin-top:.5rem;font-size:.82rem}
 .rving summary{color:var(--green);cursor:pointer;font-weight:600;padding:.2rem 0}
+
+/* ---- scanner preview when the rotation shim is active ----
+   The shim feeds the decoder a frame holding the camera twice (upright above,
+   rotated below) because ZXing only reads vertical bars. That stream is also
+   what gets rendered, so without this the user sees both copies stacked and
+   letterboxed. Crop to the top half: the preview looks like a plain camera
+   while the decoder still receives the whole frame. */
+.reader.dual{position:relative;aspect-ratio:1 / 1}
+.reader.dual video{
+  position:absolute;top:0;left:0;
+  width:100%;height:200%;      /* 1:2 source, so the top half fills the box */
+  object-fit:fill;
+}

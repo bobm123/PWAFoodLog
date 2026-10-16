@@ -863,6 +863,9 @@
         var shim = makeDualOrientationStream(stream);
         if (!shim) return stream;          // unsupported: plain camera
         rotShim = shim;
+        // The preview shows whatever stream the library is given, so crop it
+        // back to the upright half (see .reader.dual in styles.css).
+        if ($("reader")) $("reader").classList.add("dual");
         return shim.stream;
       }, function (err) { restore(); throw err; });
     };
@@ -873,6 +876,7 @@
 
   function stopRotationShim() {
     if (rotShim) { try { rotShim.stop(); } catch (e) {} rotShim = null; }
+    if ($("reader")) $("reader").classList.remove("dual");
   }
 
   function startScan() {
