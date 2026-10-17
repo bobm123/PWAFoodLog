@@ -433,3 +433,18 @@ a.btnlink:hover{border-color:var(--green);color:var(--green)}
 
 /* a whole food from the nutrition table, not a packaged product */
 .srcnote.gchip{color:var(--fg);border-color:var(--line);background:#1a1f1c}
+
+/* ---- meal schedule editor ---- */
+.slotrow{display:flex;align-items:center;gap:.4rem;margin:.35rem 0}
+.slotrow .slotname{
+  flex:1;min-width:0;background:#0d100f;color:var(--fg);
+  border:1px solid var(--line);border-radius:8px;padding:.35rem .5rem;
+  font:inherit;font-size:.85rem;
+}
+.slotrow input[type=time]{
+  background:#0d100f;color:var(--fg);border:1px solid var(--line);
+  border-radius:8px;padding:.35rem .4rem;font:inherit;font-size:.82rem;
+  /* A time input has a wide intrinsic size and will not shrink on its own,
+     which squeezed the name field down to a sliver. */
+  flex:0 0 auto;width:7.5rem;min-width:0;
+}

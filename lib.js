@@ -14,7 +14,7 @@
   // App version, shown in Settings -> About. This is the single source of
   // truth: sw.js builds its cache name from it, so bumping this is what makes
   // installed copies pick up a new release. Bump it on every deploy.
-  var APP_VERSION = "1.2.1";
+  var APP_VERSION = "1.3.0";
 
   // ---------------------------------------------------------------------
   // High-glycemic / refined-carb ingredient watchlist.
@@ -1145,6 +1145,165 @@
     return guessMeal(Number(tm[1]));
   }
 
+  // ------------------------------------------------------- meal schedules
+  //
+  // "Breakfast / lunch / dinner" is a display convention, not data. Someone
+  // eating OMAD has one meal; a 16:8 faster has two; the names mean nothing
+  // to either. So a schedule is just a list of named time slots, and an
+  // entry's group is derived from its timestamp when the diary is drawn.
+  //
+  // Nothing is rewritten when the schedule changes: entries keep the date,
+  // time and meal name they were logged with, which is what exports carry.
+  // Re-grouping is purely how today's diary is presented.
+
+  var DEFAULT_SCHEDULE = [
+    { id: "breakfast", label: "Breakfast", start: "04:00" },
+    { id: "lunch",     label: "Lunch",     start: "11:00" },
+    { id: "snack",     label: "Snacks",    start: "15:00" },
+    { id: "dinner",    label: "Dinner",    start: "17:00" },
+    { id: "evening",   label: "Evening",   start: "21:00" }
+  ];
+
+  var SCHEDULE_PRESETS = {
+    classic: {
+      label: "Classic",
+      slots: DEFAULT_SCHEDULE
+    },
+    omad: {
+      label: "OMAD",
+      slots: [
+        { id: "fast", label: "Fasting", start: "00:00" },
+        { id: "meal", label: "Meal",    start: "17:00" },
+        { id: "late", label: "Fasting", start: "20:00" }
+      ]
+    },
+    "16-8": {
+      label: "16:8",
+      slots: [
+        { id: "fast",   label: "Fasting",     start: "00:00" },
+        { id: "first",  label: "First meal",  start: "12:00" },
+        { id: "second", label: "Second meal", start: "16:00" },
+        { id: "closed", label: "Fasting",     start: "20:00" }
+      ]
+    },
+    hobbit: {
+      label: "Hobbit",
+      slots: [
+        { id: "breakfast",  label: "Breakfast",        start: "06:00" },
+        { id: "second",     label: "Second breakfast", start: "09:00" },
+        { id: "elevenses",  label: "Elevenses",        start: "11:00" },
+        { id: "luncheon",   label: "Luncheon",         start: "13:00" },
+        { id: "tea",        label: "Afternoon tea",    start: "16:00" },
+        { id: "dinner",     label: "Dinner",           start: "18:00" },
+        { id: "supper",     label: "Supper",           start: "21:00" }
+      ]
+    }
+  };
+
+  function minutesOfDay(hhmm) {
+    var m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || ""));
+    if (!m) return null;
+    var h = Number(m[1]), mi = Number(m[2]);
+    if (!(h >= 0 && h < 24) || !(mi >= 0 && mi < 60)) return null;
+    return h * 60 + mi;
+  }
+
+  /**
+   * Put a schedule in a usable state: valid slots only, sorted by start time.
+   * Falls back to the default rather than ever returning nothing, so a
+   * corrupt setting can't leave the diary with no way to group anything.
+   */
+  function normalizeSchedule(slots) {
+    var out = (slots || [])
+      .filter(function (s) { return s && minutesOfDay(s.start) !== null; })
+      .map(function (s, i) {
+        return {
+          id: String(s.id || ("slot" + i)),
+          label: String(s.label || "Meal").trim() || "Meal",
+          start: s.start
+        };
+      });
+    out.sort(function (a, b) { return minutesOfDay(a.start) - minutesOfDay(b.start); });
+    return out.length ? out : DEFAULT_SCHEDULE.slice();
+  }
+
+  /**
+   * Which slot a clock time falls in. Slots run from their start until the
+   * next one begins; anything before the first slot belongs to the last one,
+   * since an entry at 01:00 is the tail of the previous evening.
+   */
+  function slotForTime(hhmm, slots) {
+    var sched = normalizeSchedule(slots);
+    var mins = minutesOfDay(hhmm);
+    if (mins === null) return sched[0];
+    var found = null;
+    for (var i = 0; i < sched.length; i++) {
+      if (minutesOfDay(sched[i].start) <= mins) found = sched[i];
+    }
+    return found || sched[sched.length - 1];
+  }
+
+  /** The slot an entry belongs to, from its timestamp. */
+  function slotForEntry(entry, slots) {
+    var hhmm = entryTimeValue(entry);
+    if (!hhmm) return null;
+    return slotForTime(hhmm, slots);
+  }
+
+  /**
+   * Group a day's entries by schedule slot.
+   *
+   * Entries with no timestamp can't be placed by time, so they fall back to
+   * the meal name they were logged with -- old data stays visible rather
+   * than vanishing into a bucket.
+   */
+  function groupBySchedule(entries, slots) {
+    var sched = normalizeSchedule(slots);
+    var by = {}, order = [];
+    sched.forEach(function (sl) { by[sl.id] = { slot: sl, entries: [] }; order.push(sl.id); });
+    var loose = [];
+
+    (entries || []).forEach(function (e) {
+      var sl = slotForEntry(e, sched);
+      if (sl && by[sl.id]) by[sl.id].entries.push(e);
+      else loose.push(e);
+    });
+
+    var groups = order
+      .filter(function (id) { return by[id].entries.length; })
+      .map(function (id) {
+        var g = by[id];
+        return {
+          meal: g.slot.id,
+          label: g.slot.label,
+          entries: g.entries,
+          totals: dailyTotals(g.entries)
+        };
+      });
+
+    if (loose.length) {
+      groups.push({
+        meal: "other", label: MEAL_LABELS.other,
+        entries: loose, totals: dailyTotals(loose)
+      });
+    }
+
+    // Fold neighbouring slots that share a label. An OMAD day has "Fasting"
+    // before and after the meal; showing it as two identical headings reads
+    // like a mistake, so present it as one.
+    var merged = [];
+    groups.forEach(function (g) {
+      var prev = merged[merged.length - 1];
+      if (prev && prev.label === g.label) {
+        prev.entries = prev.entries.concat(g.entries);
+        prev.totals = dailyTotals(prev.entries);
+        return;
+      }
+      merged.push(g);
+    });
+    return merged;
+  }
+
   function groupByMeal(entries) {
     var order = MEALS.concat(["other"]);
     var by = {};
@@ -1633,6 +1792,13 @@
     MEAL_LABELS: MEAL_LABELS,
     guessMeal: guessMeal,
     groupByMeal: groupByMeal,
+    DEFAULT_SCHEDULE: DEFAULT_SCHEDULE,
+    SCHEDULE_PRESETS: SCHEDULE_PRESETS,
+    normalizeSchedule: normalizeSchedule,
+    slotForTime: slotForTime,
+    slotForEntry: slotForEntry,
+    groupBySchedule: groupBySchedule,
+    minutesOfDay: minutesOfDay,
     entryTime: entryTime,
     entryTimeValue: entryTimeValue,
     isoFromDateAndTime: isoFromDateAndTime,

@@ -277,6 +277,22 @@
     </div>
 
     <div class="card">
+      <h2>Meal schedule</h2>
+      <p class="hint">
+        How the diary groups a day. These are labels over the clock &mdash; your
+        entries always keep their real date and time, which is what an export
+        carries. Rename, retime, add or remove slots to match how you actually eat.
+      </p>
+      <div class="row" id="schedPresets" style="flex-wrap:wrap;gap:.4rem"></div>
+      <div id="schedList"></div>
+      <div class="row" style="margin-top:.5rem">
+        <button id="btnAddSlot" class="ghost tiny">+ Add a meal</button>
+        <button id="btnResetSched" class="ghost tiny">Reset to default</button>
+      </div>
+      <p class="status" id="schedStatus"></p>
+    </div>
+
+    <div class="card">
       <h2>About</h2>
       <p class="hint"><strong>Food Log</strong> &mdash; version <span id="appVersion">&hellip;</span></p>
       <p class="hint" id="aboutSeed"></p>

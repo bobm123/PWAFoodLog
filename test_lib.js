@@ -539,6 +539,70 @@ ok("duplicate portion weights are collapsed",
    EGGS[0]._portions.length);
 
 
+console.log("\n-- meal schedules --");
+// "Breakfast/lunch/dinner" means nothing to someone eating OMAD, so a
+// schedule is a list of named time slots and grouping is derived from each
+// entry's timestamp. Nothing stored on the entry is rewritten.
+function atTime(h, mi) {
+  return {
+    loggedAt: new Date(2026, 9, 17, h, mi).toISOString(),
+    meal: "lunch",
+    macros: { grams: 100, fat: 1, carb: 2, fiber: 0, protein: 1, netCarb: 2, kcal: 20 }
+  };
+}
+const DAY = [atTime(7, 42), atTime(13, 15), atTime(18, 30), atTime(21, 30)];
+
+ok("default schedule is usable", L.DEFAULT_SCHEDULE.length >= 3);
+ok("presets exist", Object.keys(L.SCHEDULE_PRESETS).length >= 4,
+   Object.keys(L.SCHEDULE_PRESETS).join(","));
+
+const CLASSIC = L.groupBySchedule(DAY, L.SCHEDULE_PRESETS.classic.slots);
+ok("classic splits the day up", CLASSIC.length === 4,
+   CLASSIC.map(function (g) { return g.label; }).join(","));
+ok("breakfast first", CLASSIC[0].label === "Breakfast", CLASSIC[0].label);
+
+const OMAD = L.groupBySchedule(DAY, L.SCHEDULE_PRESETS.omad.slots);
+ok("OMAD collapses the same entries", OMAD.length < CLASSIC.length,
+   OMAD.map(function (g) { return g.label + "(" + g.entries.length + ")"; }).join(","));
+ok("the meal slot is named", OMAD.some(function (g) { return g.label === "Meal"; }));
+
+const HOBBIT = L.groupBySchedule(DAY, L.SCHEDULE_PRESETS.hobbit.slots);
+ok("hobbit naming applies", HOBBIT.some(function (g) { return g.label === "Luncheon"; }),
+   HOBBIT.map(function (g) { return g.label; }).join(","));
+
+// The whole point: changing the schedule must not touch the data.
+ok("entries keep their stored meal name",
+   DAY.every(function (e) { return e.meal === "lunch"; }));
+ok("entries keep their timestamp",
+   L.entryTimeValue(DAY[0]) === "07:42", L.entryTimeValue(DAY[0]));
+
+// Slot lookup.
+ok("time lands in the right slot",
+   L.slotForTime("13:15", L.SCHEDULE_PRESETS.classic.slots).label === "Lunch",
+   L.slotForTime("13:15", L.SCHEDULE_PRESETS.classic.slots).label);
+ok("before the first slot falls to the last",
+   L.slotForTime("01:00", L.SCHEDULE_PRESETS.classic.slots).label === "Evening",
+   L.slotForTime("01:00", L.SCHEDULE_PRESETS.classic.slots).label);
+
+// A corrupt or empty setting must never leave the diary unable to group.
+ok("empty schedule falls back", L.normalizeSchedule([]).length > 0);
+ok("invalid times are dropped",
+   L.normalizeSchedule([{ id: "a", label: "A", start: "99:99" }]).length ===
+   L.DEFAULT_SCHEDULE.length);
+ok("slots are sorted by start time",
+   L.normalizeSchedule([
+     { id: "b", label: "Late", start: "20:00" },
+     { id: "a", label: "Early", start: "06:00" }
+   ])[0].label === "Early");
+
+// An untimed entry can't be placed by clock, so it must still show up.
+const MIXED = L.groupBySchedule([atTime(8, 0), { meal: "lunch", macros: { grams: 1, netCarb: 0, kcal: 0 } }],
+                                L.SCHEDULE_PRESETS.classic.slots);
+ok("untimed entries are not lost",
+   MIXED.reduce(function (n, g) { return n + g.entries.length; }, 0) === 2,
+   JSON.stringify(MIXED.map(function (g) { return g.label + ":" + g.entries.length; })));
+
+
 console.log("\n-- app version --");
 ok("APP_VERSION is semver", /^\d+\.\d+\.\d+$/.test(L.APP_VERSION), L.APP_VERSION);
 

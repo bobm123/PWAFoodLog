@@ -341,9 +341,26 @@
     }).join("");
   }
 
+  // The user's meal schedule: named time slots the diary groups by. Purely
+  // presentational -- entries keep the date, time and meal name they were
+  // logged with, which is what an export carries.
+  var mealSchedule = null;        // null until settings load; then an array
+
+  function currentSchedule() {
+    return mealSchedule && mealSchedule.length ? mealSchedule : L.DEFAULT_SCHEDULE;
+  }
+
+  function saveSchedule(slots) {
+    mealSchedule = L.normalizeSchedule(slots);
+    return S.setSetting("mealSchedule", mealSchedule).then(function () {
+      renderMealSchedule();
+      return renderToday();
+    });
+  }
+
   function renderToday() {
     return S.entriesForDate(viewDate).then(function (entries) {
-      var groups = L.groupByMeal(entries);
+      var groups = L.groupBySchedule(entries, currentSchedule());
       $("entryList").innerHTML = groups.map(function (g) {
         var showHead = !(groups.length === 1 && g.meal === "other");
         var addBtn = g.meal !== "other"
@@ -642,6 +659,15 @@
    * putting a lunch at 9pm and wrecking any CGM comparison. Use a sensible
    * hour for the meal instead, which the user can then correct.
    */
+  /** The schedule slot a given time falls in, as a meal id. */
+  function slotIdForNow() {
+    var d = new Date();
+    var hhmm = String(d.getHours()).padStart(2, "0") + ":" +
+               String(d.getMinutes()).padStart(2, "0");
+    var sl = L.slotForTime(hhmm, currentSchedule());
+    return sl ? sl.id : nowMeal();
+  }
+
   function stampFor(meal) {
     if (viewDate === today()) return new Date().toISOString();
     var hours = { breakfast: 8, lunch: 12, dinner: 19, snack: 15, other: 12 };
@@ -2031,6 +2057,53 @@
     });
   }
 
+
+  // --------------------------------------------------- meal schedule editor
+  /** Draw the preset buttons and the editable slot list in Settings. */
+  function renderMealSchedule() {
+    var host = $("schedList");
+    if (!host) return;
+    var sched = currentSchedule();
+
+    var presets = $("schedPresets");
+    if (presets) {
+      presets.innerHTML = Object.keys(L.SCHEDULE_PRESETS).map(function (k) {
+        return '<button class="ghost tiny" data-preset="' + esc(k) + '">' +
+          esc(L.SCHEDULE_PRESETS[k].label) + "</button>";
+      }).join("");
+    }
+
+    host.innerHTML = sched.map(function (sl, i) {
+      return '<div class="slotrow">' +
+        '<input class="slotname" data-slotname="' + i + '" value="' + esc(sl.label) +
+          '" aria-label="Meal name">' +
+        '<input type="time" data-slotstart="' + i + '" value="' + esc(sl.start) +
+          '" aria-label="Starts at">' +
+        '<button class="ghost tiny" data-delslot="' + i + '" aria-label="Remove">&times;</button>' +
+      "</div>";
+    }).join("");
+  }
+
+  /** Read the editor back into a schedule and persist it. */
+  function readScheduleFromInputs() {
+    var names = [].slice.call(document.querySelectorAll("[data-slotname]"));
+    return names.map(function (el, i) {
+      var startEl = document.querySelector('[data-slotstart="' + i + '"]');
+      return {
+        id: "slot" + i,
+        label: el.value,
+        start: startEl ? startEl.value : "00:00"
+      };
+    });
+  }
+
+  function commitSchedule() {
+    var slots = L.normalizeSchedule(readScheduleFromInputs());
+    return saveSchedule(slots).then(function () {
+      status($("schedStatus"), "Saved.", "ok");
+    });
+  }
+
   // -------------------------------------------------------------- settings
   // Each target is a settings key; blank means "no goal, just track it".
   var TARGETS = [
@@ -2291,6 +2364,16 @@
     $("btnAnalyzeRecipe").addEventListener("click", analyzeRecipe);
     $("btnSaveSettings").addEventListener("click", saveSettings);
     if ($("btnCheckUpdate")) $("btnCheckUpdate").addEventListener("click", checkForUpdate);
+    // Editing a name or time commits straight away -- a separate Save button
+    // for a five-field list is friction nobody needs.
+    document.addEventListener("change", function (e) {
+      var t = e.target;
+      if (!t) return;
+      if (t.hasAttribute && (t.hasAttribute("data-slotname") || t.hasAttribute("data-slotstart"))) {
+        commitSchedule();
+      }
+    });
+
     if ($("recipeSort")) {
       $("recipeSort").addEventListener("change", function () {
         recipeSort = this.value;
@@ -2334,6 +2417,28 @@
       if (!b) return;
       if (b.dataset.del) S.del("entries", Number(b.dataset.del)).then(renderToday);
       else if (b.dataset.delfood) S.del("foods", b.dataset.delfood).then(renderFoods);
+      else if (b.dataset.preset) {
+        var pre = L.SCHEDULE_PRESETS[b.dataset.preset];
+        if (pre) saveSchedule(pre.slots.slice()).then(function () {
+          status($("schedStatus"), "Using the " + pre.label + " schedule.", "ok");
+        });
+      }
+      else if (b.dataset.delslot !== undefined) {
+        var slots = readScheduleFromInputs();
+        slots.splice(Number(b.dataset.delslot), 1);
+        // Never end up with nothing to group by.
+        saveSchedule(slots.length ? slots : L.DEFAULT_SCHEDULE.slice());
+      }
+      else if (b.id === "btnAddSlot") {
+        var cur = readScheduleFromInputs();
+        cur.push({ id: "slot" + cur.length, label: "New meal", start: "12:00" });
+        saveSchedule(cur);
+      }
+      else if (b.id === "btnResetSched") {
+        saveSchedule(L.DEFAULT_SCHEDULE.slice()).then(function () {
+          status($("schedStatus"), "Back to the default schedule.", "ok");
+        });
+      }
       else if (b.id === "btnSaveRecipe") saveRecipe();
       else if (b.id === "btnCancelRecipe") cancelRecipe();
       else if (b.dataset.fixgrams !== undefined) {
@@ -2408,6 +2513,10 @@
         }, function () {}).then(function (rv) {
           recipeSort = rv || "recent";
           if ($("recipeSort")) $("recipeSort").value = recipeSort;
+          return S.getSetting("mealSchedule", null);
+        }, function () {}).then(function (sched) {
+          mealSchedule = sched && sched.length ? L.normalizeSchedule(sched) : null;
+          renderMealSchedule();
         }, function () {});
       })
       // Stamp pre-savedAt foods before the first render, so the list doesn't
