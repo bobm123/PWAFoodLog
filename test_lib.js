@@ -451,6 +451,36 @@ ok("ignores a zero serving", L.foodWithEdits(EDIT_BASE, { servingGrams: 0 }).ser
 
 ok("untouched fields stay untouched", L.foodWithEdits(EDIT_BASE, {}).name === "Original Sauce");
 
+console.log("\n-- run-together ingredient lines --");
+// Some documents collapse the whole list onto one line. As a single item it
+// is far too long to look like an ingredient, so it was dropped and the
+// recipe appeared to contain nothing at all.
+const RUN = L.splitRunTogether(
+  "1 pound Maryland jumbo lump crab meat 1 tablespoon fresh parsley 3 teaspoons Old Bay");
+ok("splits into each ingredient", RUN.length === 3, JSON.stringify(RUN));
+ok("first piece intact", RUN[0] === "1 pound Maryland jumbo lump crab meat", RUN[0]);
+ok("last piece intact", RUN[2] === "3 teaspoons Old Bay", RUN[2]);
+
+// A bracketed amount describes the ingredient already named.
+ok("bracketed weight is not a split point",
+   L.splitRunTogether("2 cups unbleached all-purpose flour (10 ounces), plus more").length === 1);
+ok("bracketed aside with a mixed number stays whole",
+   L.splitRunTogether("1 1/2 cups fresh blueberries (about 7 1/2 ounces), picked over").length === 1);
+// A mixed number is one quantity: splitting inside it produced "1" / "1/2 cups".
+ok("mixed numbers are not split mid-number",
+   L.splitRunTogether("2 1/2 cups flour 1 1/2 cups sugar").length === 2,
+   JSON.stringify(L.splitRunTogether("2 1/2 cups flour 1 1/2 cups sugar")));
+ok("an ordinary ingredient is left alone",
+   L.splitRunTogether("1 large onion, chopped into 4 pieces and set aside").length === 1);
+ok("a short line is never split", L.splitRunTogether("2 large eggs").length === 1);
+
+// Fragments the split leaves behind, and yields, are not worth asking about.
+ok("yield is not an ingredient", L.worthAsking("12 biscuits") === false);
+ok("purpose-only tail is ignored", L.worthAsking("1 tablespoon for sprinkling") === false);
+ok("a real ingredient still asks",
+   L.worthAsking("1 tablespoon kirsch (cherry brandy)") === true);
+
+
 console.log("\n-- entry times (CGM correlation) --");
 const STAMP = new Date(2026, 9, 17, 7, 42).toISOString();
 ok("time renders", /7:42/.test(L.entryTime({ loggedAt: STAMP })), L.entryTime({ loggedAt: STAMP }));

@@ -14,7 +14,7 @@
   // App version, shown in Settings -> About. This is the single source of
   // truth: sw.js builds its cache name from it, so bumping this is what makes
   // installed copies pick up a new release. Bump it on every deploy.
-  var APP_VERSION = "1.2.0";
+  var APP_VERSION = "1.2.1";
 
   // ---------------------------------------------------------------------
   // High-glycemic / refined-carb ingredient watchlist.
@@ -475,6 +475,11 @@
     // "2. Recipes to Make Now" -- a numbered contents entry. A real
     // ingredient does not put a period straight after its quantity.
     if (/^\d+\.\s+[A-Z]/.test(t)) return false;
+    // A yield, not an ingredient: "12 biscuits", "Makes 8 servings".
+    if (/^\d+\s*(biscuits?|cookies?|muffins?|scones?|rolls?|loaves|loaf|cupcakes?|bars?|slices?|pieces?)\s*$/i.test(t)) return false;
+    // A tail left behind when a run-together line was split: it names an
+    // amount and a purpose but no food ("1 tablespoon for sprinkling").
+    if (/^[\d\/. ]+\s*(?:cups?|tablespoons?|teaspoons?|tbsps?|tbs|tsps?|ounces?|oz|pounds?|lbs?|grams?|g)?\s*(?:for|to|before|after|plus|more|extra|as)\b/i.test(t)) return false;
     // Mojibake from a broken font encoding ("6RXUFHKWWS..."): English runs
     // about 35-45% vowels, gibberish far less. Ratio, not position -- an
     // earlier positional test threw out "2 Tbs. capers, rinsed".
@@ -643,6 +648,58 @@
     return out;
   }
 
+  // Units that can start a new ingredient when several are run together on
+  // one line. Deliberately not every count word: "2 eggs 1 onion" is handled
+  // by the digit rule, while "large"/"medium" would split "1 large onion".
+  var RUN_UNIT = "cups?|tablespoons?|teaspoons?|tbsps?|tbs|tsps?|ounces?|oz|" +
+                 "pounds?|lbs?|grams?|g|kg|ml|quarts?|pints?|cloves?|cans?|" +
+                 "jars?|sticks?|slices?|sprigs?|stalks?|heads?|packages?|dashes|pinch(?:es)?";
+
+  /**
+   * Split a line that has several ingredients run together.
+   *
+   * Some documents (and PDF extraction of a multi-column list) collapse the
+   * whole list onto one line: "1 pound crab meat 1 tablespoon parsley 3
+   * teaspoons Old Bay". As a single item that is far too long to look like an
+   * ingredient, so it is dropped and the recipe appears to contain nothing.
+   *
+   * A split point is a quantity followed by a measurement word, which is
+   * specific enough not to break "1 large onion, chopped into 4 pieces".
+   */
+  function splitRunTogether(line) {
+    var t = normalizeFractions(String(line || "").trim());
+    // Only bother with long lines: a normal ingredient never needs splitting.
+    if (t.split(/\s+/).length < 8) return [t];
+
+    // The split point is a quantity + unit that does NOT continue the
+    // number before it: "1 1/2 cups" is one quantity, so a match must not
+    // start at the "1/2". Requiring no digit immediately before handles it.
+    var re = new RegExp("(?:^|(?<![0-9]\\s)(?<= ))(?=\\d+(?:\\s+\\d+\\/\\d+|\\/\\d+|\\.\\d+)?\\s+(?:" +
+                        RUN_UNIT + ")\\b)", "gi");
+    // A quantity inside brackets is an aside about the ingredient already
+    // named -- "2 cups flour (10 ounces), plus more" is one item, not two --
+    // so blank bracketed spans out before looking for split points.
+    var masked = t.replace(/\([^)]*\)/g, function (m) {
+      return new Array(m.length + 1).join(" ");
+    });
+
+    var cuts = [], m;
+    re.lastIndex = 0;
+    while ((m = re.exec(masked)) !== null) {
+      if (m.index > 0) cuts.push(m.index);
+      if (re.lastIndex === m.index) re.lastIndex++;   // zero-width guard
+    }
+    if (!cuts.length) return [t];
+
+    var parts = [], prev = 0;
+    cuts.concat([t.length]).forEach(function (at) {
+      var piece = t.slice(prev, at).trim();
+      if (piece) parts.push(piece);
+      prev = at;
+    });
+    return parts.length > 1 ? parts : [t];
+  }
+
   /** Pull ingredient lines out of pasted recipe text. */
   function recipeLines(text) {
     var lines = String(text || "").split(/\r?\n/);
@@ -671,7 +728,12 @@
         out.push(ln.trim());
       }
     }
-    return stitchWrapped(joinStrandedQuantities(out));
+    // Split any line holding several ingredients before the other passes.
+    var split = [];
+    stitchWrapped(joinStrandedQuantities(out)).forEach(function (ln) {
+      splitRunTogether(ln).forEach(function (part) { split.push(part); });
+    });
+    return split;
   }
 
   /** First non-empty line, which is the title in every layout we handle. */
@@ -1551,6 +1613,7 @@
     toGrams: toGrams,
     eachSizeGrams: eachSizeGrams,
     recipeLines: recipeLines,
+    splitRunTogether: splitRunTogether,
     looksLikeProse: looksLikeProse,
     worthAsking: worthAsking,
     joinStrandedQuantities: joinStrandedQuantities,
