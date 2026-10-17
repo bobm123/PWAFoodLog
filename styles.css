@@ -69,7 +69,8 @@ h2{font-size:1rem;margin:0 0 .5rem}
 /* ---- bottom navigation ---- */
 .tabs{
   position:fixed;left:0;right:0;bottom:0;z-index:7;
-  display:grid;grid-template-columns:repeat(5,1fr);
+  /* auto-fit the columns: adding a tab must not wrap the bar onto two rows */
+  display:grid;grid-auto-flow:column;grid-auto-columns:1fr;
   background:var(--card);border-top:1px solid var(--line);
   padding-bottom:env(safe-area-inset-bottom);
 }
@@ -418,3 +419,17 @@ a.btnlink:hover{border-color:var(--green);color:var(--green)}
 .rving{margin-top:.5rem;font-size:.82rem}
 .rving summary{color:var(--green);cursor:pointer;font-weight:600;padding:.2rem 0}
 
+
+/* ---- entry times ---- */
+.etime{color:var(--green);font-variant-numeric:tabular-nums}
+.mh-time{
+  font-size:.72rem;color:var(--dim);font-variant-numeric:tabular-nums;
+  margin-left:.45rem;font-weight:400;
+}
+.editrow input[type=time]{
+  background:#0d100f;color:var(--fg);border:1px solid var(--line);
+  border-radius:8px;padding:.3rem .45rem;font:inherit;font-size:.82rem;
+}
+
+/* a whole food from the nutrition table, not a packaged product */
+.srcnote.gchip{color:var(--fg);border-color:var(--line);background:#1a1f1c}

@@ -302,9 +302,11 @@
     var m = e.macros;
     var kcal = (m.kcal != null) ? m.kcal : L.estimateKcal(m);
     var editing = editingEntryId === e.id;
+    var when = L.entryTime(e);
     return '<div class="item">' +
       '<div class="top"><span class="nm">' + esc(e.name) + "</span>" +
       '<span class="sub">' +
+        (when ? '<span class="etime">' + esc(when) + "</span> &middot; " : "") +
         (e.portion ? esc(L.portionDisplay(e.portion.count, e.portion.label)) + " &middot; " : "") +
         fmt(m.grams, 0) + " g</span></div>" +
       (e.brand ? '<div class="sub">' + esc(e.brand) + "</div>" : "") +
@@ -317,6 +319,10 @@
             '<input id="editGrams" type="number" step="any" value="' + fmt(m.grams, 0) +
               '" aria-label="New amount in grams">' +
             '<select id="editMeal" aria-label="Meal">' + mealOptions(e.meal) + "</select>" +
+            // The clock time is what lines a meal up against a CGM trace, so
+            // it has to be correctable -- phones get put down mid-meal.
+            '<input id="editTime" type="time" value="' + esc(L.entryTimeValue(e)) +
+              '" aria-label="Time eaten">' +
             '<button class="primary tiny" data-saveedit="' + e.id + '">Save</button>' +
             '<button class="ghost tiny" data-canceledit="1">Cancel</button>' +
           "</div>"
@@ -344,8 +350,12 @@
           ? '<button class="meal-add" data-mealadd="' + g.meal +
             '" aria-label="Add to ' + esc(g.label) + '">+</button>'
           : "";
+        // When the group spans real clock times, show them: a meal read as a
+        // window ("7:42-7:55 AM") is what lines up against a CGM trace.
+        var span = L.timeRange(g.entries);
         return (showHead
-          ? '<div class="mealhead"><span class="mh-left"><b>' + esc(g.label) + "</b>" + addBtn +
+          ? '<div class="mealhead"><span class="mh-left"><b>' + esc(g.label) + "</b>" +
+            (span ? '<span class="mh-time">' + esc(span.text) + "</span>" : "") + addBtn +
             '</span><span class="sub">' +
             fmt(g.totals.netCarb, 1) + " g net &middot; " + fmt(g.totals.kcal, 0) + " kcal</span></div>"
           : "") + g.entries.map(renderEntry).join("");
@@ -364,6 +374,7 @@
   function saveEditEntry(id) {
     var g = parseFloat($("editGrams").value);
     var meal = $("editMeal").value;
+    var timeStr = $("editTime") ? $("editTime").value : "";
     return S.entriesForDate(viewDate).then(function (entries) {
       var e = entries.filter(function (x) { return x.id === id; })[0];
       if (!e) { editingEntryId = null; return renderToday(); }
@@ -374,6 +385,10 @@
         e.macros = scaled;                // bad grams -> keep old amounts
       }
       e.meal = meal;
+      // Keep the stamp on the day being viewed, so correcting the time of an
+      // entry logged onto a past day doesn't silently move it to today.
+      var iso = L.isoFromDateAndTime(e.date || viewDate, timeStr);
+      if (iso) e.loggedAt = iso;
       return S.put("entries", e).then(function () {
         editingEntryId = null;
         return renderToday();
@@ -467,8 +482,16 @@
         '<input id="portionCount" inputmode="decimal" value="' + (hasServ ? "1" : serving) +
           '" aria-label="How much">' +
         '<select id="portionUnit" aria-label="Unit">' +
-          (hasServ ? '<option value="serving">' + esc(servFull) + "</option>" : "") +
-          '<option value="grams"' + (hasServ ? "" : " selected") + ">grams</option>" +
+          // A generic food knows its own sizes ("1 small", "1 medium"), which
+          // is the whole point of logging an egg without a barcode.
+          (p._portions && p._portions.length
+            ? p._portions.map(function (po, pi) {
+                return '<option value="g:' + po.grams + '"' + (pi === 0 ? " selected" : "") +
+                  ">" + esc(po.label) + " (" + Math.round(po.grams) + " g)</option>";
+              }).join("")
+            : (hasServ ? '<option value="serving">' + esc(servFull) + "</option>" : "")) +
+          '<option value="grams"' + (hasServ || (p._portions && p._portions.length) ? "" : " selected") +
+            ">grams</option>" +
         "</select>" +
         '<select id="portionMeal" aria-label="Meal">' + mealOptions(currentMeal || nowMeal()) + "</select>" +
       "</div>" +
@@ -489,6 +512,9 @@
     function portionGrams() {
       var count = L.parseCount($("portionCount").value);
       var unit = $("portionUnit").value;
+      // "g:50" means a named portion worth 50 g each ("2 x 1 large egg").
+      var fixed = /^g:([\d.]+)$/.exec(unit);
+      if (fixed) return { count: count, unit: unit, grams: count * Number(fixed[1]) };
       return { count: count, unit: unit, grams: unit === "serving" ? count * p.servingGrams : count };
     }
     function updatePreview() {
@@ -507,7 +533,15 @@
     $("btnAddEntry").addEventListener("click", function () {
       var sel = portionGrams();
       if (!(sel.grams > 0)) return;
-      var portion = sel.unit === "serving" ? { label: servShort, count: sel.count } : null;
+      var portion = null;
+      if (sel.unit === "serving") {
+        portion = { label: servShort, count: sel.count };
+      } else if (/^g:/.test(sel.unit)) {
+        // Keep the human label so the diary reads "2 x 1 large", not "100 g".
+        var opt = $("portionUnit").options[$("portionUnit").selectedIndex];
+        var lab = opt ? opt.textContent.replace(/\s*\([^)]*\)\s*$/, "") : "";
+        if (lab) portion = { label: lab, count: sel.count };
+      }
       addEntry(p, sel.grams, $("portionMeal").value, portion);
     });
     if ($("btnSaveProduct")) {
@@ -595,9 +629,25 @@
       date: viewDate, name: name, brand: "", code: "",
       nova: null, flags: [], macros: macros,
       meal: currentMeal || nowMeal(),
-      loggedAt: new Date().toISOString()
+      loggedAt: stampFor(currentMeal || nowMeal())
     }, extra || {});
     return S.put("entries", entry).then(renderToday);
+  }
+
+  /**
+   * Timestamp for a new entry on the day being viewed.
+   *
+   * Logging today uses the clock. Logging onto a past day -- "I forgot
+   * yesterday's lunch" -- would otherwise be stamped with the current time,
+   * putting a lunch at 9pm and wrecking any CGM comparison. Use a sensible
+   * hour for the meal instead, which the user can then correct.
+   */
+  function stampFor(meal) {
+    if (viewDate === today()) return new Date().toISOString();
+    var hours = { breakfast: 8, lunch: 12, dinner: 19, snack: 15, other: 12 };
+    var h = hours[meal] !== undefined ? hours[meal] : 12;
+    var iso = L.isoFromDateAndTime(viewDate, String(h).padStart(2, "0") + ":00");
+    return iso || new Date().toISOString();
   }
 
   function addEntry(p, grams, meal, portion) {
@@ -611,7 +661,7 @@
       macros: L.macrosForGrams(p.per100, grams),
       portion: portion || null,
       meal: meal || currentMeal || nowMeal(),
-      loggedAt: new Date().toISOString()
+      loggedAt: stampFor(meal || currentMeal || nowMeal())
     };
     return S.put("entries", entry).then(function () {
       clearProductCard();
@@ -931,7 +981,8 @@
         side = fmt(L.netCarbs(p.per100.carb, p.per100.fiber), 1) +
           ' g net<span class="s-per">/100g</span>';
       }
-      var chip = p._saved ? '<span class="srcnote schip">Saved</span>'
+      var chip = p._generic ? '<span class="srcnote gchip">Generic</span>'
+               : p._saved ? '<span class="srcnote schip">Saved</span>'
                : p._online ? '<span class="srcnote">OFF</span>' : "";
       return '<div class="srow" data-result="' + i + '" role="button" tabindex="0">' +
         '<div class="s-main"><span class="nm">' + esc(p.name) + "</span>" +
@@ -953,7 +1004,11 @@
       var savedCodes = {};
       saved.forEach(function (f) { if (f.code) savedCodes[f.code] = true; });
       local = local.filter(function (p) { return !(p.code && savedCodes[p.code]); });
-      var all = saved.concat(local);
+      // Generic whole foods first: someone typing "egg" or "apple" wants the
+      // food, not a particular supermarket's packaging of it.
+      var generics = (typeof NutritionDB !== "undefined")
+        ? L.searchGenericFoods(q, NutritionDB.DB) : [];
+      var all = generics.concat(saved, local);
       renderSearchResults(all);
       var n = all.length;
       status($("searchStatus"),
@@ -1342,9 +1397,17 @@
     return list;
   }
 
+  /** Recipes are their own surface now; everything else is a "food". */
+  function isRecipe(f) {
+    return f && (f.type === "recipe" || /^recipe:/.test(String(f.id || "")));
+  }
+
   function renderFoods() {
-    return S.getAll("foods").then(function (foods) {
-      foods = sortFoods(foods);
+    return S.getAll("foods").then(function (all) {
+      var foods = sortFoods(all.filter(function (f) { return !isRecipe(f); }));
+      // The cookbook shows the same records filtered the other way, so keep
+      // it in step here rather than at every renderFoods() call site.
+      renderRecipes();
       $("foodsEmpty").classList.toggle("hidden", foods.length > 0);
       $("foodList").innerHTML = foods.map(function (f) {
         var m = L.macrosForGrams(f.per100, f.servingGrams);
@@ -1399,6 +1462,52 @@
       }).join("");
     });
   }
+
+  // ------------------------------------------------------------- cookbook
+  var recipeSort = "recent";
+
+  /**
+   * The Cookbook: saved recipes only. Shares the food card's expand/edit
+   * machinery (same records, same store) but gets its own list so a recipe
+   * isn't buried among scanned barcodes -- recipes are how this diary is
+   * mostly filled in.
+   */
+  function renderRecipes() {
+    return S.getAll("foods").then(function (all) {
+      var saved = all.filter(isRecipe);
+      var prev = foodSort;
+      foodSort = recipeSort;
+      saved = sortFoods(saved);
+      foodSort = prev;
+
+      $("recipesEmpty").classList.toggle("hidden", saved.length > 0);
+      $("recipeList").innerHTML = saved.map(function (f) {
+        var m = L.macrosForGrams(f.per100, f.servingGrams);
+        var open = !!expandedFoods[f.id];
+        return '<div class="item' + (open ? " open" : "") + '">' +
+          '<div class="fhead" data-expand="' + esc(f.id) + '" role="button" tabindex="0"' +
+            ' aria-expanded="' + (open ? "true" : "false") + '">' +
+            '<div class="fmain">' +
+              '<div class="top"><span class="nm">' + esc(f.name) + "</span>" +
+                '<span class="sub">' + esc(f.servingLabel || fmt(f.servingGrams, 0) + " g") +
+              "</span></div>" +
+              '<div class="macros">per serving: net carbs <b>' + fmt(m.netCarb, 1) +
+                " g</b> &middot; fat <b>" + fmt(m.fat, 1) + " g</b> &middot; protein <b>" +
+                fmt(m.protein, 1) + " g</b></div>" +
+            "</div>" +
+            '<span class="fchev">' + (open ? "&and;" : "&or;") + "</span>" +
+          "</div>" +
+          (editingFoodId === f.id ? foodEditForm(f) : (open ? foodDetailRows(f) : "")) +
+          '<div class="badges">' + novaBadge(f.nova) + flagBadges(f.flags) + "</div>" +
+          '<div class="acts">' +
+            '<button class="primary tiny" data-log="' + esc(f.id) + '">Log a serving</button>' +
+            '<button class="ghost tiny" data-delfood="' + esc(f.id) + '">Delete</button>' +
+          "</div>" +
+        "</div>";
+      }).join("");
+    });
+  }
+
 
   function saveManualFood() {
     var name = $("cfName").value.trim();
@@ -2113,6 +2222,7 @@
     // Opening Foods is the moment the user looks at awaiting rows -- a good
     // time to try filling them in.
     if (name === "foods") reconcilePending();
+    if (name === "cook") renderRecipes();
   }
 
   // ------------------------------------------------------------------ init
@@ -2181,6 +2291,13 @@
     $("btnAnalyzeRecipe").addEventListener("click", analyzeRecipe);
     $("btnSaveSettings").addEventListener("click", saveSettings);
     if ($("btnCheckUpdate")) $("btnCheckUpdate").addEventListener("click", checkForUpdate);
+    if ($("recipeSort")) {
+      $("recipeSort").addEventListener("change", function () {
+        recipeSort = this.value;
+        S.setSetting("recipeSort", recipeSort);
+        renderRecipes();
+      });
+    }
     if ($("foodSort")) {
       $("foodSort").addEventListener("change", function () {
         foodSort = this.value;
@@ -2287,6 +2404,10 @@
         return S.getSetting("foodSort", "recent").then(function (v) {
           foodSort = v || "recent";
           if ($("foodSort")) $("foodSort").value = foodSort;
+          return S.getSetting("recipeSort", "recent");
+        }, function () {}).then(function (rv) {
+          recipeSort = rv || "recent";
+          if ($("recipeSort")) $("recipeSort").value = recipeSort;
         }, function () {});
       })
       // Stamp pre-savedAt foods before the first render, so the list doesn't

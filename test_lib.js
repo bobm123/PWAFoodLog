@@ -451,6 +451,64 @@ ok("ignores a zero serving", L.foodWithEdits(EDIT_BASE, { servingGrams: 0 }).ser
 
 ok("untouched fields stay untouched", L.foodWithEdits(EDIT_BASE, {}).name === "Original Sauce");
 
+console.log("\n-- entry times (CGM correlation) --");
+const STAMP = new Date(2026, 9, 17, 7, 42).toISOString();
+ok("time renders", /7:42/.test(L.entryTime({ loggedAt: STAMP })), L.entryTime({ loggedAt: STAMP }));
+ok("time input value", L.entryTimeValue({ loggedAt: STAMP }) === "07:42",
+   L.entryTimeValue({ loggedAt: STAMP }));
+ok("no stamp renders empty", L.entryTime({}) === "");
+ok("no stamp has no input value", L.entryTimeValue({}) === "");
+
+// Built from local parts, not Date.parse: parsing "...T07:42" as UTC would
+// shift a breakfast by hours and ruin the comparison against a CGM trace.
+const ISO = L.isoFromDateAndTime("2026-10-17", "07:42");
+ok("date+time round-trips to the same clock time",
+   L.entryTimeValue({ loggedAt: ISO }) === "07:42", ISO);
+ok("rejects a bad time", L.isoFromDateAndTime("2026-10-17", "25:00") === null);
+ok("rejects a bad date", L.isoFromDateAndTime("nope", "07:42") === null);
+
+const SPAN = L.timeRange([
+  { loggedAt: new Date(2026, 9, 17, 7, 42).toISOString() },
+  { loggedAt: new Date(2026, 9, 17, 7, 55).toISOString() }
+]);
+ok("range spans first to last", /7:42/.test(SPAN.text) && /7:55/.test(SPAN.text), SPAN.text);
+ok("single entry shows one time",
+   L.timeRange([{ loggedAt: STAMP }]).text.indexOf("\u2013") === -1,
+   L.timeRange([{ loggedAt: STAMP }]).text);
+ok("untimed entries give no range", L.timeRange([{}, {}]) === null);
+ok("meal inferred from a time", L.mealForTime("07:42") === "breakfast", L.mealForTime("07:42"));
+ok("evening is dinner", L.mealForTime("19:10") === "dinner", L.mealForTime("19:10"));
+
+console.log("\n-- generic foods --");
+// The nutrition table doubles as a generic-food database, so an egg or an
+// apple can be logged without hunting down a supermarket barcode.
+const EGGS = L.searchGenericFoods("egg", NDB);
+ok("finds the generic egg", EGGS.length > 0 && EGGS[0]._key === "egg",
+   EGGS.length ? EGGS[0]._key : "(none)");
+ok("marked generic", EGGS[0]._generic === true);
+ok("offers small/medium/large",
+   EGGS[0]._portions.map(function (p) { return p.label; }).join(",") ===
+   "1 small,1 medium,1 large",
+   JSON.stringify(EGGS[0]._portions));
+ok("portion weights are real", EGGS[0]._portions[2].grams === 50, EGGS[0]._portions[2].grams);
+ok("carries per-100g macros", EGGS[0].per100.protein > 10, EGGS[0].per100.protein);
+
+ok("exact match ranks first", L.searchGenericFoods("apple", NDB)[0]._key === "apple",
+   L.searchGenericFoods("apple", NDB)[0]._key);
+ok("multi-word query works",
+   L.searchGenericFoods("chicken breast", NDB)[0]._key === "chicken breast");
+ok("a one-letter query is ignored", L.searchGenericFoods("e", NDB).length === 0);
+// Word-boundary matching: "apple" must not be swamped by unrelated entries
+// that merely contain the letters.
+ok("no bare-substring noise",
+   L.searchGenericFoods("egg", NDB).every(function (g) { return /egg/.test(g._key); }),
+   JSON.stringify(L.searchGenericFoods("egg", NDB).map(function (g) { return g._key; })));
+// "" duplicates a named size for eggs (both 50 g); keep the named one.
+ok("duplicate portion weights are collapsed",
+   new Set(EGGS[0]._portions.map(function (p) { return p.grams; })).size ===
+   EGGS[0]._portions.length);
+
+
 console.log("\n-- app version --");
 ok("APP_VERSION is semver", /^\d+\.\d+\.\d+$/.test(L.APP_VERSION), L.APP_VERSION);
 

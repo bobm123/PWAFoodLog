@@ -14,7 +14,7 @@
   // App version, shown in Settings -> About. This is the single source of
   // truth: sw.js builds its cache name from it, so bumping this is what makes
   // installed copies pick up a new release. Bump it on every deploy.
-  var APP_VERSION = "1.1.0";
+  var APP_VERSION = "1.2.0";
 
   // ---------------------------------------------------------------------
   // High-glycemic / refined-carb ingredient watchlist.
@@ -1014,6 +1014,75 @@
    * meal (logged before meals existed) land in "other". Empty groups are
    * omitted. Each group carries its own dailyTotals() for subtotals.
    */
+  // ------------------------------------------------------- entry times
+  // Entries have always carried loggedAt, but nothing showed or edited it.
+  // Correlating what you ate against a CGM trace needs the actual clock time,
+  // and logging something you forgot yesterday needs it to be settable.
+
+  /** "7:42 AM" in the device's locale, or "" when there's no timestamp. */
+  function entryTime(entry) {
+    var iso = entry && entry.loggedAt;
+    if (!iso) return "";
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+
+  /** "07:42" for an <input type="time">, or "" when there's no timestamp. */
+  function entryTimeValue(entry) {
+    var iso = entry && entry.loggedAt;
+    if (!iso) return "";
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    return String(d.getHours()).padStart(2, "0") + ":" +
+           String(d.getMinutes()).padStart(2, "0");
+  }
+
+  /**
+   * Combine a YYYY-MM-DD date with an HH:MM clock time into an ISO stamp.
+   *
+   * Built from local parts rather than Date.parse so the result is the user's
+   * wall-clock time: "2026-10-17T07:42" parsed as UTC would shift a morning
+   * meal by hours and quietly ruin the CGM correlation.
+   */
+  function isoFromDateAndTime(dateStr, timeStr) {
+    var dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr || ""));
+    var tm = /^(\d{1,2}):(\d{2})$/.exec(String(timeStr || ""));
+    if (!dm || !tm) return null;
+    var h = Number(tm[1]), mi = Number(tm[2]);
+    if (!(h >= 0 && h < 24) || !(mi >= 0 && mi < 60)) return null;
+    var d = new Date(Number(dm[1]), Number(dm[2]) - 1, Number(dm[3]), h, mi, 0, 0);
+    if (isNaN(d.getTime())) return null;
+    return d.toISOString();
+  }
+
+  /**
+   * Earliest and latest times in a set of entries, as display strings.
+   * Returns null when nothing is timestamped.
+   */
+  function timeRange(entries) {
+    var stamps = (entries || [])
+      .map(function (e) { return e && e.loggedAt; })
+      .filter(Boolean)
+      .map(function (iso) { return new Date(iso); })
+      .filter(function (d) { return !isNaN(d.getTime()); })
+      .sort(function (a, b) { return a - b; });
+    if (!stamps.length) return null;
+    var first = stamps[0], last = stamps[stamps.length - 1];
+    var fmtT = function (d) {
+      return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    };
+    var a = fmtT(first), b = fmtT(last);
+    return { from: a, to: b, text: a === b ? a : a + "\u2013" + b };
+  }
+
+  /** Meal label implied by a clock time, for an entry logged onto a past day. */
+  function mealForTime(timeStr) {
+    var tm = /^(\d{1,2}):(\d{2})$/.exec(String(timeStr || ""));
+    if (!tm) return null;
+    return guessMeal(Number(tm[1]));
+  }
+
   function groupByMeal(entries) {
     var order = MEALS.concat(["other"]);
     var by = {};
@@ -1165,6 +1234,86 @@
    * recipes, plus the cached-product mirror. Saved foods first; a cached
    * product that duplicates a saved food's barcode is dropped.
    */
+  // ----------------------------------------------------- generic foods
+  // The nutrition table is already a generic-food database: per-100 g macros
+  // plus typical weights for count units, so "egg" knows a large one is 50 g
+  // and a small 38 g. Surfacing it in search means a plain apple or chicken
+  // breast can be logged without hunting for "EGGS - Kroger - 36 oz".
+
+  /** Prettier label for a count unit: "" is the plain item. */
+  function unitLabel(u) {
+    return u === "" ? "1 item" : "1 " + u;
+  }
+
+  /**
+   * Generic foods matching a query, as product-shaped rows the search list
+   * can render alongside barcoded hits.
+   *
+   * Each row carries the portion choices the table knows about, so the UI can
+   * offer small/medium/large rather than demanding grams.
+   */
+  function searchGenericFoods(query, db) {
+    var q = String(query || "").toLowerCase().trim();
+    if (q.length < 2 || !db) return [];
+    var out = [];
+    for (var key in db) {
+      if (!Object.prototype.hasOwnProperty.call(db, key)) continue;
+      var rec = db[key];
+      var names = [key].concat(rec.aliases || []);
+      // Match on a word boundary, not a bare substring: "apple" should not
+      // drag in cider vinegar, and "egg" should not pull in eggplant unless
+      // the word really starts there.
+      var hit = names.some(function (n) {
+        var ln = String(n).toLowerCase();
+        return ln === q || ln.split(/[^a-z]+/).some(function (w) { return w.indexOf(q) === 0; });
+      });
+      if (!hit) continue;
+
+      // Portion choices: named count units first, then a sane gram default.
+      var units = rec.units || {};
+      var portions = [], seenGrams = {};
+      Object.keys(units).forEach(function (u) {
+        // "" is the generic fallback and usually duplicates a named size
+        // ("1 item" 50 g alongside "1 large" 50 g) -- keep the named one.
+        if (u === "" && Object.keys(units).length > 1) return;
+        if (seenGrams[units[u]]) return;
+        seenGrams[units[u]] = true;
+        portions.push({ label: unitLabel(u), grams: units[u] });
+      });
+      portions.sort(function (a, b) { return a.grams - b.grams; });
+
+      var serving = portions.length ? portions[0].grams : 100;
+      out.push({
+        code: "",
+        name: key.charAt(0).toUpperCase() + key.slice(1),
+        brand: "Generic",
+        image: "",
+        per100: {
+          fat: rec.fat, carb: rec.carb, fiber: rec.fiber,
+          protein: rec.protein, sugars: 0,
+          kcal: rec.fat * 9 + Math.max(0, rec.carb - rec.fiber) * 4 + rec.protein * 4
+        },
+        servingSize: portions.length ? portions[0].label : "",
+        servingGrams: serving,
+        nova: null,
+        additives: [],
+        ingredientsText: "",
+        flags: [],
+        _generic: true,
+        _key: key,
+        _portions: portions
+      });
+    }
+    // Shortest name first: a query for "egg" should offer "Egg" before
+    // "Eggplant", and an exact match before anything else.
+    out.sort(function (a, b) {
+      var ae = a._key === q ? 0 : 1, be = b._key === q ? 0 : 1;
+      if (ae !== be) return ae - be;
+      return a._key.length - b._key.length;
+    });
+    return out.slice(0, 12);
+  }
+
   function searchLocal(query, foods, cachedProducts) {
     var q = String(query || "").trim().toLowerCase();
     if (q.length < 2) return [];
@@ -1421,6 +1570,11 @@
     MEAL_LABELS: MEAL_LABELS,
     guessMeal: guessMeal,
     groupByMeal: groupByMeal,
+    entryTime: entryTime,
+    entryTimeValue: entryTimeValue,
+    isoFromDateAndTime: isoFromDateAndTime,
+    timeRange: timeRange,
+    mealForTime: mealForTime,
     scaleMacros: scaleMacros,
     recentFoods: recentFoods,
     dateRange: dateRange,
@@ -1433,6 +1587,7 @@
     normalizeSearchResults: normalizeSearchResults,
     SEARCH_ERR_MESSAGE: SEARCH_ERR_MESSAGE,
     searchLocal: searchLocal,
+    searchGenericFoods: searchGenericFoods,
     searchProducts: searchProducts,
     OFF_URL: function (code) {
       return "https://world.openfoodfacts.org/api/v2/product/" +

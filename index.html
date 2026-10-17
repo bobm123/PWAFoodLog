@@ -144,8 +144,8 @@
   <!-- ------------------------------ FOODS ------------------------------ -->
   <section id="panel-foods" class="panel">
     <div class="card">
-      <h2>Custom foods &amp; recipes</h2>
-      <p class="hint">Saved foods can be logged by the serving. Recipes never expire and work offline.</p>
+      <h2>Custom foods</h2>
+      <p class="hint">Scanned and hand-entered foods, logged by the serving. Recipes live in the Cookbook tab.</p>
       <div class="sortrow">
         <label for="foodSort">Sort</label>
         <select id="foodSort">
@@ -175,6 +175,28 @@
       <p class="hint">Enter the amounts for <em>one serving</em>. Net carbs = carbs &minus; fiber.</p>
       <button id="btnAddFood" class="primary">Save food</button>
       <p class="status" id="foodStatus"></p>
+    </div>
+
+  </section>
+
+  <!-- ---------------------------- COOKBOOK ---------------------------- -->
+  <section id="panel-cook" class="panel">
+    <div class="card">
+      <h2>Cookbook</h2>
+      <p class="hint">Your recipes, ready to log by the serving.</p>
+      <div class="sortrow">
+        <label for="recipeSort">Sort</label>
+        <select id="recipeSort">
+          <option value="recent">Recently added</option>
+          <option value="name">Name (A&ndash;Z)</option>
+          <option value="carbs">Net carbs (low first)</option>
+        </select>
+      </div>
+      <div id="recipeList" class="list"></div>
+      <p class="empty" id="recipesEmpty">
+        No recipes yet. Paste one below &mdash; on an iPhone you can copy the
+        ingredients straight off a cookbook page with the Camera.
+      </p>
     </div>
 
     <div class="card">
@@ -290,6 +312,10 @@
   <button class="tab" data-tab="foods" role="tab" aria-label="Foods">
     <svg viewBox="0 0 24 24"><polygon points="12,4 14.2,9.2 20,9.6 15.5,13.4 17,19 12,16 7,19 8.5,13.4 4,9.6 9.8,9.2"/></svg>
     <span class="tl">Foods</span>
+  </button>
+  <button class="tab" data-tab="cook" role="tab" aria-label="Cookbook">
+    <svg viewBox="0 0 24 24"><polygon points="12,4 14.2,9.2 20,9.6 15.5,13.4 17,19 12,16 7,19 8.5,13.4 4,9.6 9.8,9.2"/></svg>
+    <span class="tl">Cook</span>
   </button>
   <button class="tab" data-tab="settings" role="tab" aria-label="Settings">
     <svg viewBox="0 0 24 24"><line x1="4" y1="8" x2="20" y2="8"/><circle cx="10" cy="8" r="2.2"/><line x1="4" y1="16" x2="20" y2="16"/><circle cx="15" cy="16" r="2.2"/></svg>
