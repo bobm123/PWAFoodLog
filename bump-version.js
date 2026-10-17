@@ -19,13 +19,52 @@ var path = require("path");
 var version = process.argv[2];
 if (!/^\d+\.\d+\.\d+$/.test(version || "")) {
   console.error("usage: node bump-version.js <major.minor.patch>");
+  console.error("");
+  console.error("  patch  1.3.0 -> 1.3.1   bug fix, no new surface");
+  console.error("  minor  1.3.1 -> 1.4.0   new feature or UI");
+  console.error("  major  1.4.0 -> 2.0.0   breaking change (old exports stop importing)");
   process.exit(1);
+}
+
+/**
+ * Catch a version that skips or goes backwards.
+ *
+ * Easy mistakes: bumping 1.3.0 -> 1.3.2 (a gap, so a device that missed one
+ * can't tell what it has), or shipping a feature as a patch. A warning
+ * rather than an error -- there are legitimate reasons to jump -- but it has
+ * to be said out loud.
+ */
+function checkStep(from, to) {
+  if (!from) return;
+  var a = from.split(".").map(Number), b = to.split(".").map(Number);
+  var ok =
+    (b[0] === a[0] && b[1] === a[1] && b[2] === a[2] + 1) ||   // patch
+    (b[0] === a[0] && b[1] === a[1] + 1 && b[2] === 0) ||      // minor
+    (b[0] === a[0] + 1 && b[1] === 0 && b[2] === 0);           // major
+  if (ok) return;
+  var back = b[0] < a[0] ||
+    (b[0] === a[0] && (b[1] < a[1] || (b[1] === a[1] && b[2] <= a[2])));
+  console.error("! " + from + " -> " + to + (back ? " goes backwards." : " skips a step."));
+  console.error("  Expected one of: " +
+    [a[0] + "." + a[1] + "." + (a[2] + 1),
+     a[0] + "." + (a[1] + 1) + ".0",
+     (a[0] + 1) + ".0.0"].join(", "));
+  console.error("");
 }
 
 var targets = [
   { file: "lib.js", re: /(var APP_VERSION = ")[^"]+(")/ },
   { file: "sw.js",  re: /(var APP_VERSION = ")[^"]+(")/ }
 ];
+
+// Read the version we are moving from, for the step check below.
+var currentVersion = null;
+try {
+  var probe = fs.readFileSync(path.join(__dirname, "lib.js"), "utf8");
+  var pm = /var APP_VERSION = "([^"]+)"/.exec(probe);
+  if (pm) currentVersion = pm[1];
+} catch (e) { /* first run, or lib.js missing */ }
+if (currentVersion && currentVersion !== version) checkStep(currentVersion, version);
 
 var changed = 0;
 targets.forEach(function (t) {

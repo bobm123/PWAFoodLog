@@ -239,12 +239,24 @@ Netlify or Cloudflare Pages work identically — drag the folder in.
 **Bump the version on every deploy.**
 
 ```bash
-node bump-version.js 1.0.2
+node bump-version.js 1.3.1
 ```
 
 That writes `APP_VERSION` in **both** `lib.js` (shown in Settings → About) and
 `sw.js` (which names the cache `foodlog-<version>`). `test_lib.js` fails if the
 two ever drift apart.
+
+Which number to raise — ordinary semver:
+
+| Change | Example | Bump |
+|---|---|---|
+| Bug fix, no new surface | a barcode orientation that would not scan | **patch** `1.3.0` → `1.3.1` |
+| New feature or UI | the Cookbook tab, a meal schedule editor | **minor** `1.3.1` → `1.4.0` |
+| Breaking change | an export an older build can no longer import | **major** `1.4.0` → `2.0.0` |
+
+Treat the stored data as the contract. Adding a field entries did not have
+before is a minor bump, because an older export still imports; renaming or
+removing one, or changing what a field means, is a major.
 
 The version is deliberately repeated rather than imported. A browser only
 installs a new service worker when `sw.js` itself differs byte-for-byte; when
