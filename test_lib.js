@@ -640,6 +640,61 @@ ok("all-furniture falls back rather than going blank",
    L.recipeTitle("3/8/2017") === "3/8/2017");
 
 
+console.log("\n-- my shops (store filtering) --");
+// Searching "italian sausage" returned 91 products from chains all over the
+// country; the one in your hand was somewhere down the list. Picking the
+// shops near you cuts that to a few. Geographic, not behavioural -- tick
+// another chain when you travel.
+ok("presets cover the usual chains", L.STORE_PRESETS.length >= 15,
+   L.STORE_PRESETS.length);
+ok("a store carries its own labels",
+   L.STORE_PRESETS.filter(function (s) { return s.id === "safeway"; })[0]
+     .brands.indexOf("signature select") !== -1);
+
+// Brand data is inconsistent: a mojibake apostrophe split Trader Joe's into
+// two entries (1400 + 272 products) that are really one brand.
+ok("apostrophe variants fold together",
+   L.brandKey("Trader Joe\u2019s") === L.brandKey("Trader Joe\ufffds"),
+   L.brandKey("Trader Joe\u2019s"));
+ok("case and punctuation fold", L.brandKey("  H-E-B ") === "h e b", L.brandKey("  H-E-B "));
+ok("a product can list several brands",
+   L.productBrandKeys({ brand: "Nutella, Ferrero" }).length === 2);
+
+const ROWS = [
+  { name: "Premio Hot Italian Sausage", brand: "Premio" },
+  { name: "Signature Select Sausage", brand: "Signature select" },
+  { name: "Kroger Italian sausage", brand: "Kroger" },
+  { name: "Unbranded Torta", brand: "" },
+  { name: "Egg", brand: "Generic", _generic: true },
+  { name: "My Sausage Bake", brand: "Recipe", type: "recipe" },
+  { name: "A saved food", brand: "Chobani", _saved: true }
+];
+
+ok("nothing chosen leaves the list alone",
+   L.filterToStores(ROWS, []).length === ROWS.length);
+
+const SAFE = L.filterToStores(ROWS, ["safeway"]);
+ok("a house brand is kept",
+   SAFE.some(function (r) { return r.brand === "Signature select"; }));
+ok("another chain is dropped",
+   !SAFE.some(function (r) { return r.brand === "Premio"; }));
+// 11% of the bundled seed has an empty brand field, so keeping all of those
+// would leak ~10,000 products past the filter.
+ok("an unbranded database product is dropped",
+   !SAFE.some(function (r) { return r.name === "Unbranded Torta"; }));
+// The filter is about shops, not about your own data.
+ok("generic foods are never hidden", SAFE.some(function (r) { return r._generic; }));
+ok("recipes are never hidden", SAFE.some(function (r) { return r.type === "recipe"; }));
+ok("saved foods are never hidden", SAFE.some(function (r) { return r._saved; }));
+
+const BOTH = L.filterToStores(ROWS, ["safeway", "kroger"]);
+ok("two shops keep both their brands",
+   BOTH.filter(function (r) {
+     return !r._generic && !r._saved && r.type !== "recipe";
+   }).length === 2,
+   JSON.stringify(BOTH.map(function (r) { return r.brand; })));
+
+
 console.log("\n-- app version --");
 ok("APP_VERSION is semver", /^\d+\.\d+\.\d+$/.test(L.APP_VERSION), L.APP_VERSION);
 

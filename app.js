@@ -141,14 +141,29 @@
   }
 
   /** Instant substring search over the on-device corpus (seed + your scans). */
+  // Stores the user shops at. Empty means no filtering -- the default, so the
+  // app behaves exactly as before until someone opts in.
+  var myStores = [];
+
   function localSearchProducts(q) {
     q = String(q || "").trim().toLowerCase();
     var idxP = searchIndex ? Promise.resolve(searchIndex) : buildSearchIndex();
     return idxP.then(function (idx) {
-      var out = [];
+      var want = myStores.length ? L.brandsForStores(myStores) : null;
+      var out = [], skipped = 0;
       for (var i = 0; i < idx.length && out.length < 50; i++) {
-        if (idx[i].hay.indexOf(q) !== -1) out.push(idx[i].p);
+        if (idx[i].hay.indexOf(q) === -1) continue;
+        // Apply the store filter here, not to the finished list: the scan
+        // stops at 50 hits, so filtering afterwards would still miss a
+        // product from your shop that happened to rank 60th.
+        if (want) {
+          var mine = L.productBrandKeys(idx[i].p)
+            .some(function (k) { return want[k]; });
+          if (!mine) { skipped++; continue; }
+        }
+        out.push(idx[i].p);
       }
+      out._filteredOut = skipped;
       return out;
     });
   }
@@ -1029,7 +1044,11 @@
       // A saved copy of a barcoded product outranks the database's row.
       var savedCodes = {};
       saved.forEach(function (f) { if (f.code) savedCodes[f.code] = true; });
+      // .filter() returns a NEW array, which would drop the hidden-count
+      // the search attached -- carry it across.
+      var heldBack = local._filteredOut || 0;
       local = local.filter(function (p) { return !(p.code && savedCodes[p.code]); });
+      local._filteredOut = heldBack;
       // Generic whole foods first: someone typing "egg" or "apple" wants the
       // food, not a particular supermarket's packaging of it.
       var generics = (typeof NutritionDB !== "undefined")
@@ -1037,8 +1056,12 @@
       var all = generics.concat(saved, local);
       renderSearchResults(all);
       var n = all.length;
+      var held = local._filteredOut || 0;
+      var storeNote = held
+        ? " " + held + " from other shops hidden \u2014 change in Settings."
+        : "";
       status($("searchStatus"),
-        n ? (n + (n >= 50 ? "+" : "") + " match" + (n === 1 ? "" : "es") + " on this device."
+        n ? (n + (n >= 50 ? "+" : "") + " match" + (n === 1 ? "" : "es") + " on this device." + storeNote
            + (navigator.onLine !== false ? " Not it? Search Open Food Facts below." : ""))
           : (navigator.onLine !== false
               ? "Nothing on this device matched. Try Open Food Facts below."
@@ -2104,6 +2127,39 @@
     });
   }
 
+
+  // ------------------------------------------------------------- my stores
+  /**
+   * Which shops to show products from. Geographic, not behavioural: you know
+   * which chains are near you, and you tick another when you travel.
+   */
+  function renderStorePicker() {
+    var host = $("storeList");
+    if (!host) return;
+    host.innerHTML = L.STORE_PRESETS.map(function (st) {
+      var on = myStores.indexOf(st.id) !== -1;
+      return '<button class="storechip' + (on ? " on" : "") + '" data-store="' +
+        esc(st.id) + '" aria-pressed="' + (on ? "true" : "false") + '">' +
+        esc(st.label) + "</button>";
+    }).join("");
+    var note = $("storeNote");
+    if (note) {
+      note.textContent = myStores.length
+        ? myStores.length + " selected. Searches show these shops, plus your own " +
+          "foods, recipes and generic items."
+        : "Nothing selected, so every brand is shown.";
+    }
+  }
+
+  function toggleStore(id) {
+    var i = myStores.indexOf(id);
+    if (i === -1) myStores.push(id); else myStores.splice(i, 1);
+    return S.setSetting("myStores", myStores).then(function () {
+      searchIndex = searchIndex;      // index is brand-agnostic; no rebuild
+      renderStorePicker();
+    });
+  }
+
   // -------------------------------------------------------------- settings
   // Each target is a settings key; blank means "no goal, just track it".
   var TARGETS = [
@@ -2417,6 +2473,11 @@
       if (!b) return;
       if (b.dataset.del) S.del("entries", Number(b.dataset.del)).then(renderToday);
       else if (b.dataset.delfood) S.del("foods", b.dataset.delfood).then(renderFoods);
+      else if (b.dataset.store) toggleStore(b.dataset.store);
+      else if (b.id === "btnClearStores") {
+        myStores = [];
+        S.setSetting("myStores", myStores).then(renderStorePicker);
+      }
       else if (b.dataset.preset) {
         var pre = L.SCHEDULE_PRESETS[b.dataset.preset];
         if (pre) saveSchedule(pre.slots.slice()).then(function () {
@@ -2517,6 +2578,10 @@
         }, function () {}).then(function (sched) {
           mealSchedule = sched && sched.length ? L.normalizeSchedule(sched) : null;
           renderMealSchedule();
+          return S.getSetting("myStores", null);
+        }, function () {}).then(function (st) {
+          myStores = Array.isArray(st) ? st : [];
+          renderStorePicker();
         }, function () {});
       })
       // Stamp pre-savedAt foods before the first render, so the list doesn't

@@ -14,7 +14,7 @@
   // App version, shown in Settings -> About. This is the single source of
   // truth: sw.js builds its cache name from it, so bumping this is what makes
   // installed copies pick up a new release. Bump it on every deploy.
-  var APP_VERSION = "1.3.3";
+  var APP_VERSION = "1.4.0";
 
   // ---------------------------------------------------------------------
   // High-glycemic / refined-carb ingredient watchlist.
@@ -1574,6 +1574,100 @@
     return out.slice(0, 12);
   }
 
+  // ------------------------------------------------------- store filtering
+  //
+  // A name search can return a hundred packaged products, most from chains
+  // nowhere near you -- "italian sausage" returns 91, and the one in your
+  // hand is somewhere down the list. The fix is geographic, not behavioural:
+  // you know which shops you use, so pick them and the list shortens. Travel
+  // somewhere else and tick that chain for the trip.
+  //
+  // A store is grouped with its own labels, because that is where the volume
+  // is: Safeway itself has ~41 products in the bundled database, but
+  // Signature Select, O Organics and Lucerne together have far more.
+
+  var STORE_PRESETS = [
+    { id: "aldi",        label: "Aldi",            brands: ["aldi", "simply nature", "specially selected", "millville"] },
+    { id: "costco",      label: "Costco",          brands: ["kirkland signature", "kirkland"] },
+    { id: "foodlion",    label: "Food Lion",       brands: ["food lion", "nature s promise"] },
+    { id: "giant",       label: "Giant",           brands: ["giant", "nature s promise"] },
+    { id: "gianteagle",  label: "Giant Eagle",     brands: ["giant eagle", "market district"] },
+    { id: "heb",         label: "H-E-B",           brands: ["h e b", "heb", "hill country fare"] },
+    { id: "harristeeter",label: "Harris Teeter",   brands: ["harris teeter"] },
+    { id: "kroger",      label: "Kroger",          brands: ["kroger", "private selection", "simple truth"] },
+    { id: "lidl",        label: "Lidl",            brands: ["lidl", "preferred selection"] },
+    { id: "meijer",      label: "Meijer",          brands: ["meijer"] },
+    { id: "publix",      label: "Publix",          brands: ["publix", "greenwise"] },
+    { id: "safeway",     label: "Safeway",         brands: ["safeway", "signature select", "o organics", "lucerne"] },
+    { id: "samsclub",    label: "Sam's Club",      brands: ["member s mark"] },
+    { id: "sprouts",     label: "Sprouts",         brands: ["sprouts"] },
+    { id: "stopandshop", label: "Stop & Shop",     brands: ["stop & shop", "nature s promise"] },
+    { id: "target",      label: "Target",          brands: ["good & gather", "market pantry", "favorite day"] },
+    { id: "traderjoes",  label: "Trader Joe's",    brands: ["trader joe s"] },
+    { id: "walmart",     label: "Walmart",         brands: ["great value", "marketside", "equate"] },
+    { id: "wegmans",     label: "Wegmans",         brands: ["wegmans"] },
+    { id: "weis",        label: "Weis",            brands: ["weis", "weis quality"] },
+    { id: "wholefoods",  label: "Whole Foods",     brands: ["whole foods market", "365 whole foods market", "365"] }
+  ];
+
+  /**
+   * Fold a brand string to a comparable key.
+   *
+   * Brand data is inconsistent: a mojibake apostrophe splits "Trader Joe's"
+   * into two entries (1400 + 272 products) that should be one, and case and
+   * punctuation vary throughout.
+   */
+  function brandKey(brand) {
+    return String(brand == null ? "" : brand)
+      .replace(/[\u2019\ufffd\u2018`]/g, "'")
+      .toLowerCase()
+      .replace(/[^a-z0-9& ]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  /** Every brand key on a product. One row often lists several. */
+  function productBrandKeys(p) {
+    return String((p && p.brand) || "")
+      .split(",")
+      .map(brandKey)
+      .filter(Boolean);
+  }
+
+  /** The brand keys covered by a set of chosen store ids. */
+  function brandsForStores(storeIds) {
+    var want = {};
+    (storeIds || []).forEach(function (id) {
+      for (var i = 0; i < STORE_PRESETS.length; i++) {
+        if (STORE_PRESETS[i].id !== id) continue;
+        STORE_PRESETS[i].brands.forEach(function (b) { want[brandKey(b)] = true; });
+      }
+    });
+    return want;
+  }
+
+  /**
+   * Keep only products from the chosen stores.
+   *
+   * Anything without a store brand is always kept: generic whole foods, the
+   * user's own saved foods and their recipes are not what the filter is for,
+   * and hiding them would make the feature feel broken. With nothing chosen
+   * the list is returned untouched.
+   */
+  function filterToStores(products, storeIds) {
+    if (!storeIds || !storeIds.length) return (products || []).slice();
+    var want = brandsForStores(storeIds);
+    return (products || []).filter(function (p) {
+      if (!p) return false;
+      // Your own things are never filtered -- that is not what this is for.
+      if (p._generic || p._saved || p.type === "recipe") return true;
+      // A database product with no brand at all is a different matter: 11%
+      // of the bundled seed has an empty brand field, so keeping them all
+      // would leak ~10,000 products past the filter and defeat it.
+      return productBrandKeys(p).some(function (k) { return want[k]; });
+    });
+  }
+
   function searchLocal(query, foods, cachedProducts) {
     var q = String(query || "").trim().toLowerCase();
     if (q.length < 2) return [];
@@ -1856,6 +1950,11 @@
     normalizeSearchResults: normalizeSearchResults,
     SEARCH_ERR_MESSAGE: SEARCH_ERR_MESSAGE,
     searchLocal: searchLocal,
+    STORE_PRESETS: STORE_PRESETS,
+    brandKey: brandKey,
+    productBrandKeys: productBrandKeys,
+    brandsForStores: brandsForStores,
+    filterToStores: filterToStores,
     searchGenericFoods: searchGenericFoods,
     searchProducts: searchProducts,
     OFF_URL: function (code) {

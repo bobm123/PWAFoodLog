@@ -448,3 +448,12 @@ a.btnlink:hover{border-color:var(--green);color:var(--green)}
      which squeezed the name field down to a sliver. */
   flex:0 0 auto;width:7.5rem;min-width:0;
 }
+
+/* ---- my shops picker ---- */
+.storegrid{display:flex;flex-wrap:wrap;gap:.35rem;margin:.1rem 0 .5rem}
+.storechip{
+  background:#0d100f;color:var(--dim);border:1px solid var(--line);
+  border-radius:999px;padding:.3rem .6rem;font:inherit;font-size:.78rem;
+  cursor:pointer;
+}
+.storechip.on{background:var(--green);color:#07120b;border-color:var(--green);font-weight:600}
