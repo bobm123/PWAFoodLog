@@ -16,7 +16,7 @@
 //
 // Keep this in sync with APP_VERSION in lib.js; `node bump-version.js <ver>`
 // writes both, and test_lib.js fails if they ever drift apart.
-var APP_VERSION = "1.3.2";
+var APP_VERSION = "1.3.3";
 var CACHE = "foodlog-" + APP_VERSION;
 var SHELL = [
   "./", "./index.html", "./styles.css", "./lib.js", "./nutrition-db.js",
