@@ -40,8 +40,13 @@ each hit `high` or `moderate` severity with a short explanation.
 
 ## Features
 
-- **Barcode scanning** with the phone camera, plus manual barcode entry as a fallback.
-  12-digit UPC-A codes are automatically retried as 13-digit EAN-13.
+- **Barcode scanning** with the phone camera, plus manual barcode entry as a
+  fallback. 12-digit UPC-A codes are automatically retried as 13-digit EAN-13,
+  and barcodes read in **any orientation** (see
+  [Removing the CDN dependency](#removing-the-cdn-dependency) for why that
+  needs a patched library). An Amazon item code (an ASIN, which Amazon prints
+  on packs it relabels) is recognised and explained rather than reported as a
+  missing product, since no food database can ever resolve one.
 - **Search by name** on the Find tab — log "greek yogurt" without a barcode.
   Search is **local-first**: it queries a bundled on-device food database
   instantly and offline, and Open Food Facts is only contacted when you tap
@@ -62,9 +67,15 @@ each hit `high` or `moderate` severity with a short explanation.
 - **Hydration tracking**: a water card on the diary with quick-add buttons
   (+8/+12/+16 oz) against a daily goal, stored per day and included in backups.
 - **NOVA 1–4 processing badge** and **high-GI ingredient flags** on every product.
-- **Meals**: every entry belongs to breakfast, lunch, dinner or a snack
-  (defaulted from the time of day), and the diary groups entries by meal with
-  per-meal subtotals. Entries from before meals existed appear under "Other".
+- **Entry times**: every entry records the clock time it was logged, shown on
+  the row and editable — so a diary can be lined up against a CGM trace, and
+  something you forgot yesterday can be logged at the time you actually ate it.
+- **Configurable meal schedule** (Settings → Meal schedule): the diary groups
+  by named time slots you define. Presets for Classic, OMAD, 16:8 and Hobbit;
+  rename, retime, add or remove slots freely. The grouping is presentation
+  only — entries keep the date, time and meal name they were logged with, which
+  is what an export carries, so switching schemes never rewrites history.
+  Meal headings show the span of times in the group.
 - **Daily totals**: net carbs, fat, protein, calories, and a calorie split bar.
 - **A `+` on the diary** opening an add sheet: pick the meal, scan a barcode,
   search by name, log a serving of a saved food, **quick-add** a one-off entry
@@ -77,8 +88,21 @@ each hit `high` or `moderate` severity with a short explanation.
   days in red, a days-under-budget streak, and averages over logged days.
   Tap any bar to open that day in the diary.
 - **Optional net-carb budget** (Settings) with an over-budget warning.
-- **Custom foods and recipes**, including direct import of
-  `analyze_recipe.py --json` output from the sibling `keto-recipe-analyzer` skill.
+- **Cookbook tab**: saved recipes get their own surface, separate from scanned
+  and hand-entered foods, with their own sort order. Log a serving in one tap.
+- **Paste a recipe** (Cookbook → Add a recipe) and the app works out the macros
+  on-device, offline, against a bundled 132-ingredient table. On an iPhone you
+  can copy a cookbook page's ingredients straight out of the Camera with Live
+  Text and paste them in — no OCR code in the app. Analyzer JSON from
+  `analyze_recipe.py --json` is detected and imported directly.
+  Anything it cannot match is listed for you to weigh or skip before saving, so
+  the totals are never quietly wrong; if the text yields nothing usable it says
+  so rather than presenting a wall of questions.
+- **Generic foods**: search "egg", "apple" or "chicken breast" and log by
+  small / medium / large from the same ingredient table — no barcode needed,
+  no hunting for a particular supermarket's packaging.
+- **Custom foods** entered by hand, optionally carrying a barcode so a future
+  scan of that pack resolves instantly, even offline.
 - **Offline capable**: app shell is precached; previously scanned products resolve
   from cache.
 - **Your data stays on your device** (IndexedDB). Export/import JSON to back up
@@ -283,22 +307,52 @@ Camera scanning works on `localhost` in Chrome; on a phone you need real HTTPS.
 Use the manual barcode box to test lookups without a camera. Try `3017620422003`
 (Nutella — NOVA 4) or any packaged item in your kitchen.
 
-## Importing a recipe from the analyzer
+## Getting a recipe in
+
+All three routes end at the same place: **Cookbook → Add a recipe**.
+
+**Paste the ingredients.** On an iPhone, point the Camera at a cookbook page,
+tap the text-selection icon, select the ingredient lines and copy. Paste them
+in, set how many servings the batch makes, and tap Analyze. The macros are
+worked out on the device against `nutrition-db.js` — no network, and no OCR
+code in the app, because iOS already does that part well.
+
+**Paste analyzer JSON.** Output from the sibling keto-recipe-analyzer is
+recognised automatically and imported without a review step:
 
 ```bash
 cd ../keto-recipe-analyzer/scripts
-python3 analyze_recipe.py ../../FishCakes-Keto.txt --servings 4 --json
+python analyze_recipe.py ../../FishCakes-Keto.txt --servings 4 --json
 ```
 
-Copy the JSON, paste it into **Foods → Import from the recipe analyzer**. It becomes
-a food you can log by the serving. The importer converts per-serving macros into a
-per-100 g block so recipes and packaged products are handled identically.
+**Type it by hand** on the Foods tab, for something with no written recipe.
+
+### What the review step does
+
+Anything the ingredient table cannot match is listed with a grams field and a
+Skip button, and the recipe cannot be saved until each one is handled. A
+dropped ingredient makes the per-serving numbers quietly wrong, which is worse
+than a visible question — but page furniture ("FROM OUR SPONSORS", "PREP
+20 mins") is filtered out rather than asked about, since across a 91-recipe
+corpus roughly 90% of unmatched lines were that rather than food.
+
+Measured on that corpus: 37 recipes import with no questions at all, the median
+is one question, and the worst case is eight. Where the text yields nothing
+usable — a scanned page whose text layer is garbage — the app says so and asks
+for the ingredients directly instead of listing dozens of fragments.
+
+The parser is deliberately more forgiving than the Python one, because
+extracted text is messy: vulgar fractions (¾, 1⅛), ingredients wrapped across
+two lines, quantities stranded on their own line by print layout, whole lists
+crammed onto one line, and non-breaking or U+2028 separators that look like
+spaces but are not.
 
 ## Project layout
 
 ```
 foodlog-pwa/
-├── index.html              App shell: markup for all four tabs, loads the scripts.
+├── index.html              App shell: markup for all six tabs (Today, Find,
+│                             History, Foods, Cook, Settings); loads the scripts.
 ├── styles.css              All styling. Dark theme, no framework, no build step.
 ├── manifest.webmanifest    PWA metadata: name, icons, standalone display mode.
 ├── sw.js                   Service worker. Precaches the shell for offline use;
@@ -313,6 +367,16 @@ foodlog-pwa/
 │                             - netCarbs(), macrosForGrams(), dailyTotals()
 │                             - lookupProduct()     offline-tolerant lookup state machine
 │                             - recipeFromAnalyzerJson()  import from the recipe analyzer
+│                             - analyzeRecipeText() parse pasted recipe text (OCR-tolerant)
+│                             - searchGenericFoods() whole foods by name and size
+│                             - groupBySchedule()   diary grouping from entry timestamps
+├── nutrition-db.js         GENERATED. 132 ingredients with per-100g macros,
+│                             densities and typical unit weights, used to
+│                             analyze pasted recipes and to back generic-food
+│                             search. Regenerate with:
+│                               cd ../keto-recipe-analyzer/scripts
+│                               python export_db_js.py > ../../foodlog-pwa/nutrition-db.js
+│                             The source of truth is that script's nutrition_db.py.
 ├── store.js                IndexedDB persistence: log entries, custom foods,
 │                             settings, the cached-product mirror (incl. the
 │                             bundled seed), and the pending-scan queue. Plus
@@ -326,6 +390,8 @@ foodlog-pwa/
 │   └── seed-meta.json          {version, count, ...}; version drives re-import.
 ├── tools/
 │   └── build_seed.py       DuckDB script to regenerate seed/ from an OFF export.
+├── bump-version.js         Writes APP_VERSION into lib.js and sw.js together,
+│                             and warns if the version step is not valid semver.
 │
 ├── test_lib.js             Node tests: parsing, macros, GI watchlist, recipe import.
 ├── test_offline.js         Node tests: every lookup failure mode (timeout, offline,
@@ -364,8 +430,10 @@ tests that run under plain Node. `app.js` only moves data between `lib.js`,
 Run the tests with:
 
 ```bash
-node test_lib.js        # 45 assertions: parsing, macros, GI watchlist, recipe import
-node test_offline.js    # 29 assertions: timeout, offline, cache fallback, not-found
+node test_lib.js        # 267 assertions: parsing, macros, GI watchlist, recipe
+                        #   text parsing, generic foods, entry times, schedules
+node test_offline.js    # 47 assertions: timeout, offline, cache fallback,
+                        #   not-found, Amazon item codes
 node test_features.js   # 69 assertions: meals, rescaling, recents, history, search
 node test_seed.js       # 16 assertions: the bundled seed validates + normalizes
 node smoke.js           # optional end-to-end run in headless Chromium (npm i playwright)
