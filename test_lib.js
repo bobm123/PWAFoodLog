@@ -603,6 +603,43 @@ ok("untimed entries are not lost",
    JSON.stringify(MIXED.map(function (g) { return g.label + ":" + g.entries.length; })));
 
 
+console.log("\n-- extraction whitespace and titles --");
+// PDF and web extraction emit separators that look like spaces but are not
+// matched by \\s: one U+2028 inside an ingredient list stopped the
+// run-together splitter firing, so a whole recipe resolved to nothing.
+// 37 of 91 corpus files carried at least one of these.
+ok("U+00A0 becomes a space",
+   L.normalizeWhitespace("a\u00a0b") === "a b");
+ok("U+202F becomes a space",
+   L.normalizeWhitespace("a\u202fb") === "a b");
+ok("U+2028 becomes a newline",
+   L.normalizeWhitespace("a\u2028b") === "a\nb");
+ok("zero-width space is removed",
+   L.normalizeWhitespace("a\u200bb") === "ab");
+ok("ordinary text is untouched",
+   L.normalizeWhitespace("2 cups flour") === "2 cups flour");
+
+// The real failure: a line glued together with a U+2028 in the middle.
+const GLUED = "Soup\n1 pound crab meat\u20281 tablespoon parsley 3 teaspoons Old Bay";
+const GL = L.recipeLines(GLUED);
+ok("a U+2028 no longer hides the ingredients", GL.length >= 2,
+   JSON.stringify(GL));
+
+// "First non-empty line" names a printed web page after its date.
+ok("a print date is not the title",
+   L.recipeTitle("3/8/2017\nBlueberry Scones") === "Blueberry Scones",
+   L.recipeTitle("3/8/2017\nBlueberry Scones"));
+ok("a URL is not the title",
+   L.recipeTitle("https://example.com/r/1\nChicken Soup") === "Chicken Soup");
+ok("a page marker is not the title",
+   L.recipeTitle("1/3\nBeef Stew") === "Beef Stew",
+   L.recipeTitle("1/3\nBeef Stew"));
+ok("a normal title still wins",
+   L.recipeTitle("Keto Sardine Cakes\n2 eggs") === "Keto Sardine Cakes");
+ok("all-furniture falls back rather than going blank",
+   L.recipeTitle("3/8/2017") === "3/8/2017");
+
+
 console.log("\n-- app version --");
 ok("APP_VERSION is semver", /^\d+\.\d+\.\d+$/.test(L.APP_VERSION), L.APP_VERSION);
 

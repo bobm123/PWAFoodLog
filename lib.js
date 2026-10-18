@@ -14,7 +14,7 @@
   // App version, shown in Settings -> About. This is the single source of
   // truth: sw.js builds its cache name from it, so bumping this is what makes
   // installed copies pick up a new release. Bump it on every deploy.
-  var APP_VERSION = "1.3.1";
+  var APP_VERSION = "1.3.2";
 
   // ---------------------------------------------------------------------
   // High-glycemic / refined-carb ingredient watchlist.
@@ -321,6 +321,26 @@
     "\u2159": "1/6", "\u215a": "5/6",
     "\u215b": "1/8", "\u215c": "3/8", "\u215d": "5/8", "\u215e": "7/8"
   };
+
+  /**
+   * Fold the odd whitespace PDF and web extraction leaves behind.
+   *
+   * Non-breaking spaces, narrow no-break spaces, zero-width spaces and
+   * U+2028 LINE SEPARATOR all read as spaces but are not matched by \s in a
+   * JavaScript regex. One U+2028 in the middle of an ingredient list was
+   * enough to stop the run-together splitter firing at all, so the whole
+   * recipe resolved to nothing. Measured across a 91-recipe corpus, 37 files
+   * carried at least one of these.
+   *
+   * U+2028/2029 become real newlines because that is what they mean; the
+   * rest become ordinary spaces.
+   */
+  function normalizeWhitespace(text) {
+    return String(text == null ? "" : text)
+      .replace(/[\u2028\u2029]/g, "\n")
+      .replace(/[\u00a0\u2007\u202f\u205f\u3000]/g, " ")
+      .replace(/[\u200b\u200c\u200d\ufeff]/g, "");
+  }
 
   /** Vulgar fractions to ASCII; "1" + U+215B becomes "1 1/8" so it parses. */
   function normalizeFractions(text) {
@@ -702,7 +722,7 @@
 
   /** Pull ingredient lines out of pasted recipe text. */
   function recipeLines(text) {
-    var lines = String(text || "").split(/\r?\n/);
+    var lines = normalizeWhitespace(text).split(/\r?\n/);
     var collecting = false, sawHeader = false, out = [], i, ln;
 
     for (i = 0; i < lines.length; i++) {
@@ -737,11 +757,30 @@
   }
 
   /** First non-empty line, which is the title in every layout we handle. */
+  /**
+   * The recipe's name.
+   *
+   * "First non-empty line" is wrong for a printed web page: that is usually
+   * the print date ("3/8/2017") or the source URL, so a saved recipe ends up
+   * called a date. Skip the furniture and take the first line that reads
+   * like a title.
+   */
   function recipeTitle(text) {
-    var lines = String(text || "").split(/\r?\n/);
+    var lines = normalizeWhitespace(text).split(/\r?\n/);
     for (var i = 0; i < lines.length; i++) {
       var ln = lines[i].trim();
-      if (ln && !SECTION_START.test(ln)) return ln;
+      if (!ln || SECTION_START.test(ln)) continue;
+      if (/^\d+[\/.\-]\d+[\/.\-]\d+/.test(ln)) continue;        // a date
+      if (/^https?:\/\//i.test(ln)) continue;                   // a URL
+      if (/^\d+\s*\/\s*\d+$/.test(ln)) continue;                 // "1/3" page marker
+      if (/^(page\s*\d|printed|print|recipe)\s*$/i.test(ln)) continue;
+      if (/^[\d\s:apm.]+$/i.test(ln)) continue;                  // a bare time
+      return ln;
+    }
+    // Everything looked like furniture -- fall back to the first line rather
+    // than leaving the recipe nameless.
+    for (var j = 0; j < lines.length; j++) {
+      if (lines[j].trim()) return lines[j].trim();
     }
     return "";
   }
@@ -1767,6 +1806,7 @@
     dailyTotals: dailyTotals,
     recipeFromAnalyzerJson: recipeFromAnalyzerJson,
     normalizeFractions: normalizeFractions,
+    normalizeWhitespace: normalizeWhitespace,
     parseIngredientLine: parseIngredientLine,
     matchIngredient: matchIngredient,
     toGrams: toGrams,
