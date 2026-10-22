@@ -749,6 +749,77 @@ ok("a 10 oz ribeye lands in a sane calorie range", (function () {
 })());
 
 
+console.log("\n-- count-style gram weights --");
+// Two bugs made a counted ingredient almost weightless, so a recipe built on
+// eggs or chicken breasts reported a fraction of its real calories.
+//
+//   "2 eggs"         -> the count word IS the food name, so no unit parsed
+//                       and the number was read as 2 GRAMS.
+//   "4 slices ham"   -> parsed fine, but every table key is singular, so
+//                       "slices" found nothing and fell back to a 5 g pinch.
+const COUNTED = [
+  ["2 eggs", 100],
+  ["1 egg", 50],
+  ["3 chicken breasts", 510],
+  ["4 slices ham", 112],
+  ["1 slice ham", 28],
+  ["2 sausage links", 80],
+  ["2 ribeye steaks", 680],
+  ["6 chicken wings", 270],
+  ["2 lamb chops", 200],
+  ["3 cloves garlic", 9],
+  ["2 slices bread", 56],
+  ["4 stalks celery", 160],
+  ["4 salmon fillets", 680]
+];
+COUNTED.forEach(function (c) {
+  const row = L.analyzeRecipeText("T" + "\n\n" + c[0], 1, NDB).rows[0];
+  ok(c[0] + " weighs its items", row && Math.round(row.grams) === c[1],
+     row ? Math.round(row.grams) + "g, want " + c[1] + "g" : "unresolved");
+});
+
+// A measure is not a countable item. These share the same units map, so a
+// careless fallback would read "2 flour" as 2 cups and "3 salt" as 3 pinches.
+ok("a bare number on flour is still grams",
+   Math.round(L.analyzeRecipeText("T" + "\n\n200 flour", 1, NDB).rows[0].grams) === 200);
+ok("a bare number on salt is still grams",
+   Math.round(L.analyzeRecipeText("T" + "\n\n50 sugar", 1, NDB).rows[0].grams) === 50);
+// Volume and mass paths must be untouched by the count fix.
+ok("1 cup flour is unchanged",
+   Math.round(L.analyzeRecipeText("T" + "\n\n1 cup flour", 1, NDB).rows[0].grams) === 125);
+ok("10 oz ribeye is unchanged",
+   Math.round(L.analyzeRecipeText("T" + "\n\n10 oz ribeye", 1, NDB).rows[0].grams) === 284);
+
+console.log("\n-- matcher rejects fragments --");
+// Text mangled out of a PDF is full of stray fragments. A one- or two-letter
+// word, or a word naming a cut rather than a food, must not claim a match:
+// a single "t" was pulling in a 283 g steak and adding it to the totals.
+["t", "ny", "bone", "t bone", "meat", "of meat to", "steak", "chop", "roast",
+ "boneless", "lean", "loin", "-r t"].forEach(function (junk) {
+  ok(JSON.stringify(junk) + " matches nothing",
+     L.matchIngredient(junk, NDB) === null, L.matchIngredient(junk, NDB));
+});
+
+// ...while the real names those words came from still resolve. A candidate is
+// normalised like the input now, so a hyphenated alias is reachable at all.
+[["t-bone steak", "strip steak"], ["bone-in pork chop", "pork chop"],
+ ["boneless skinless chicken thigh", "chicken thigh"],
+ ["lean ground beef", "ground beef lean"], ["new york strip", "strip steak"],
+ ["beef stew meat", "chuck roast"], ["ribeye steak", "ribeye"],
+ ["sirloin steak", "sirloin steak"], ["lamb chop", "lamb chop"]].forEach(function (c) {
+  ok(c[0] + " resolves", L.matchIngredient(c[0], NDB) === c[1],
+     L.matchIngredient(c[0], NDB));
+});
+
+// Page furniture used to match baking soda at 5 g a line, silently padding
+// the totals of any recipe printed from a web page.
+["page 1 of 2", "bottom of form", "join thousands of fans on facebook"]
+  .forEach(function (junk) {
+  ok(JSON.stringify(junk) + " is not an ingredient",
+     L.matchIngredient(junk, NDB) === null, L.matchIngredient(junk, NDB));
+});
+
+
 console.log("\n-- app version --");
 ok("APP_VERSION is semver", /^\d+\.\d+\.\d+$/.test(L.APP_VERSION), L.APP_VERSION);
 

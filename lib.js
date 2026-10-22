@@ -14,7 +14,7 @@
   // App version, shown in Settings -> About. This is the single source of
   // truth: sw.js builds its cache name from it, so bumping this is what makes
   // installed copies pick up a new release. Bump it on every deploy.
-  var APP_VERSION = "1.4.1";
+  var APP_VERSION = "1.4.2";
 
   // ---------------------------------------------------------------------
   // High-glycemic / refined-carb ingredient watchlist.
@@ -305,7 +305,14 @@
   var COUNT_WORDS = ["medium", "large", "small", "clove", "cloves", "can", "cans",
                      "slice", "slices", "strip", "sprig", "bunch", "stalk",
                      "stick", "fillet", "breast", "piece", "pieces", "pinch",
-                     "lemon", "head"];
+                     "lemon", "head",
+                     // whole-muscle cuts and joints, from the steak entries
+                     "steak", "steaks", "chop", "chops", "thigh", "thighs",
+                     "wing", "wings", "link", "links", "rasher", "rashers",
+                     "fillets", "breasts", "spear", "spears", "sheet", "sheets",
+                     "bar", "bars", "ear", "ears", "package", "packages",
+                     "lime", "limes", "strips", "sticks", "stalks", "bunches",
+                     "sprigs", "heads", "lemons"];
 
   var WORD_NUM = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5,
                    six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
@@ -399,7 +406,13 @@
     large: 1, medium: 1, small: 1, plain: 1, pure: 1, light: 1, dark: 1,
     sauce: 1, juice: 1, oil: 1, syrup: 1, milk: 1, cream: 1, flour: 1,
     seed: 1, seeds: 1, leaf: 1, leaves: 1, paste: 1, puree: 1, mix: 1,
-    unsalted: 1, salted: 1, sweet: 1, hot: 1, cold: 1, warm: 1, instant: 1
+    unsalted: 1, salted: 1, sweet: 1, hot: 1, cold: 1, warm: 1, instant: 1,
+    // Cut descriptors, not foods. "bone" appears in "t-bone steak" and
+    // "bone-in pork chop", and on its own it named a 283 g steak.
+    bone: 1, boneless: 1, skinless: 1, lean: 1, extra: 1, loin: 1, york: 1,
+    // "meat" names a category, not a cut: via the "beef stew meat" alias a
+    // stray "of meat, to" was claiming a 907 g chuck roast.
+    meat: 1, stew: 1, stewing: 1, roast: 1, braising: 1, chop: 1, steak: 1
   };
 
   /** Fuzzy-match free text to a table key. */
@@ -413,7 +426,11 @@
       if (!Object.prototype.hasOwnProperty.call(db, key)) continue;
       var cands = [key].concat(db[key].aliases || []);
       for (var c = 0; c < cands.length; c++) {
-        var cand = cands[c];
+        // Normalise the candidate the same way as the input. Without this a
+        // hyphenated alias could never match: the input had its punctuation
+        // folded to spaces, so "bone-in pork chop" was never findable in it.
+        var cand = String(cands[c] || "").toLowerCase()
+                     .replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim();
         if (!cand) continue;
         var cw = cand.split(" ");
         var score;
@@ -424,7 +441,11 @@
           for (var k = 0; k < cw.length; k++) {
             if (words.indexOf(cw[k]) === -1) continue;
             overlap++;
-            if (!GENERIC_WORDS[cw[k]]) specific++;
+            // A word under three letters carries too little information to
+            // claim a match by itself: text mangled out of a PDF is full of
+            // stray fragments, and one "t" or "ny" was enough to pull in a
+            // 283 g steak and add it to the totals.
+            if (!GENERIC_WORDS[cw[k]] && cw[k].length > 2) specific++;
           }
           // Require at least one word that actually names a food. Without
           // this, sharing "powder" or "fresh" is enough to claim a match.
@@ -437,6 +458,22 @@
     return bestScore > 0 ? best : null;
   }
 
+  /**
+   * Fold a plural count word to the singular form the table uses.
+   *
+   * Only the endings that actually occur: "slices"/"fillets" -> drop the s,
+   * "wedges"/"dashes" -> drop the es, "leaves" -> leaf. Deliberately narrow,
+   * because a wrong guess here silently mis-weighs an ingredient.
+   */
+  function singularUnit(word) {
+    var w = String(word || "").toLowerCase();
+    if (/(ch|sh|s|x|z)es$/.test(w)) return w.slice(0, -2);
+    if (/ves$/.test(w)) return w.slice(0, -3) + "f";
+    if (/ies$/.test(w)) return w.slice(0, -3) + "y";
+    if (/[^s]s$/.test(w)) return w.slice(0, -1);
+    return null;
+  }
+
   function toGrams(amount, unitKind, unitWord, rec) {
     rec = rec || {};
     if (unitKind === "mass") return amount * MASS[unitWord];
@@ -444,6 +481,10 @@
     if (unitKind === "count") {
       var units = rec.units || {};
       if (units[unitWord] !== undefined) return amount * units[unitWord];
+      // Recipes write "4 slices ham" but every table key is singular, so the
+      // plural found nothing and the line silently fell back to a 5 g pinch.
+      var one = singularUnit(unitWord);
+      if (one && units[one] !== undefined) return amount * units[one];
       if (units[""] !== undefined) return amount * units[""];
       return null;
     }
@@ -818,9 +859,22 @@
       } else if (item.unitKind) {
         grams = toGrams(item.amount, item.unitKind, item.unitWord, rec);
       } else if (item.amount !== null) {
-        grams = (rec.units && rec.units[""] !== undefined)
-          ? item.amount * rec.units[""]
-          : item.amount;                 // bare number: treat as grams
+        // "2 eggs", "3 chicken breasts": the count word IS the food name, so
+        // no unit was parsed. Treating the number as grams gave 2 g of egg.
+        // Only 24 of the 91 entries with count units carry the "" fallback,
+        // so prefer a single named unit -- an entry with one count size has
+        // no ambiguity about what "2 of them" weighs.
+        var u = rec.units || {};
+        // Only a unit the recipe would COUNT. "cup" and "pinch" sit in the
+        // same map but are measures, not items: letting them answer a bare
+        // number would read "2 flour" as 2 cups and "3 salt" as 3 pinches.
+        var countable = Object.keys(u).filter(function (k) {
+          return k !== "" && k !== "cup" && k !== "pinch" &&
+                 COUNT_WORDS.indexOf(k) !== -1;
+        });
+        if (u[""] !== undefined) grams = item.amount * u[""];
+        else if (countable.length === 1) grams = item.amount * u[countable[0]];
+        else grams = item.amount;        // bare number: treat as grams
       }
 
       // "Dill", "Salt to taste" -- a real ingredient with no stated amount.

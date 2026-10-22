@@ -1616,11 +1616,11 @@
     "strip steak": {
       "aliases": [
         "new york strip",
-        "ny strip",
         "strip loin",
         "porterhouse",
-        "t-bone",
-        "t bone"
+        "tbone",
+        "t-bone steak",
+        "ny strip steak"
       ],
       "carb": 0.0,
       "density": 1.0,
