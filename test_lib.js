@@ -695,6 +695,60 @@ ok("two shops keep both their brands",
    JSON.stringify(BOTH.map(function (r) { return r.brand; })));
 
 
+console.log("\n-- steak and whole-muscle cuts --");
+// "ground beef" was the only beef in the table, and it is a poor stand-in for
+// a steak: over a 10 oz portion the trim and fat difference is real.
+ok("a steak cut is searchable by name",
+   L.searchGenericFoods("ribeye", NDB).length === 1);
+// Butchers and recipes spell it both ways.
+ok("the two-word spelling finds it too",
+   L.searchGenericFoods("rib eye", NDB).length === 1);
+ok("\"steak\" offers the cuts, not mince",
+   L.searchGenericFoods("steak", NDB).length >= 4);
+
+// The pork catch-all used to claim "pork chop" as an alias, which would have
+// shadowed the chop's own leaner figures.
+const CHOP = L.searchGenericFoods("pork chop", NDB);
+ok("pork chop resolves to its own entry",
+   CHOP.length === 1 && CHOP[0].name.toLowerCase() === "pork chop",
+   JSON.stringify(CHOP.map(function (c) { return c.name; })));
+
+// An alias claimed by two entries makes matching depend on key order.
+(function () {
+  const seen = {}, dups = [];
+  Object.keys(NDB).forEach(function (k) {
+    [k].concat(NDB[k].aliases || []).forEach(function (a) {
+      a = String(a).toLowerCase();
+      if (seen[a]) dups.push(a);
+      seen[a] = k;
+    });
+  });
+  ok("no alias is claimed twice", dups.length === 0, dups.join(", "));
+})();
+
+// The weight-based form is what real recipes and a "10 oz ribeye" use.
+const CUTS = [
+  ["10 oz ribeye", "ribeye", 284],
+  ["2 lb chuck roast, cubed", "chuck roast", 907],
+  ["8 oz sirloin", "sirloin steak", 227],
+  ["1.5 lbs chicken thighs", "chicken thigh", 680]
+];
+CUTS.forEach(function (c) {
+  const row = L.analyzeRecipeText("T" + "\n\n" + c[0], 1, NDB).rows[0];
+  ok(c[0] + " resolves by weight",
+     row && row.dbKey === c[1] && Math.round(row.grams) === c[2],
+     row ? row.dbKey + " " + Math.round(row.grams) + "g" : "unresolved");
+});
+
+// Prime runs fatter than the choice-grade figures stored here; the entry is a
+// starting point the user can override, not a claim about their steak.
+ok("a 10 oz ribeye lands in a sane calorie range", (function () {
+  const row = L.analyzeRecipeText("T" + "\n\n10 oz ribeye", 1, NDB).rows[0];
+  const kcal = row.fat * 9 + row.protein * 4 + row.netCarb * 4;
+  return kcal > 500 && kcal < 900;
+})());
+
+
 console.log("\n-- app version --");
 ok("APP_VERSION is semver", /^\d+\.\d+\.\d+$/.test(L.APP_VERSION), L.APP_VERSION);
 

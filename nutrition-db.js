@@ -279,6 +279,17 @@
         "cup": 108.0
       }
     },
+    "brisket": {
+      "aliases": [
+        "beef brisket"
+      ],
+      "carb": 0.0,
+      "density": 1.0,
+      "fat": 17.0,
+      "fiber": 0.0,
+      "protein": 19.0,
+      "units": {}
+    },
     "broccoli": {
       "aliases": [],
       "carb": 7.0,
@@ -417,6 +428,35 @@
         "breast": 170.0
       }
     },
+    "chicken thigh": {
+      "aliases": [
+        "chicken thighs",
+        "boneless skinless chicken thigh",
+        "chicken leg"
+      ],
+      "carb": 0.0,
+      "density": 1.0,
+      "fat": 11.0,
+      "fiber": 0.0,
+      "protein": 19.0,
+      "units": {
+        "thigh": 110.0
+      }
+    },
+    "chicken wing": {
+      "aliases": [
+        "chicken wings",
+        "wings"
+      ],
+      "carb": 0.0,
+      "density": 1.0,
+      "fat": 16.0,
+      "fiber": 0.0,
+      "protein": 18.0,
+      "units": {
+        "wing": 45.0
+      }
+    },
     "chickpeas": {
       "aliases": [
         "garbanzo",
@@ -430,6 +470,22 @@
       "units": {
         "cup": 164.0
       }
+    },
+    "chuck roast": {
+      "aliases": [
+        "beef chuck",
+        "pot roast",
+        "stew beef",
+        "stewing beef",
+        "beef stew meat",
+        "braising steak"
+      ],
+      "carb": 0.0,
+      "density": 1.0,
+      "fat": 16.0,
+      "fiber": 0.0,
+      "protein": 19.0,
+      "units": {}
     },
     "cilantro": {
       "aliases": [
@@ -633,6 +689,36 @@
       "protein": 14.0,
       "units": {}
     },
+    "filet mignon": {
+      "aliases": [
+        "tenderloin",
+        "beef tenderloin",
+        "filet"
+      ],
+      "carb": 0.0,
+      "density": 1.0,
+      "fat": 9.0,
+      "fiber": 0.0,
+      "protein": 22.0,
+      "units": {
+        "steak": 227.0
+      }
+    },
+    "flank steak": {
+      "aliases": [
+        "skirt steak",
+        "flap steak",
+        "flat iron steak"
+      ],
+      "carb": 0.0,
+      "density": 1.0,
+      "fat": 7.0,
+      "fiber": 0.0,
+      "protein": 22.0,
+      "units": {
+        "steak": 227.0
+      }
+    },
     "flax seeds": {
       "aliases": [
         "flaxseed",
@@ -742,6 +828,19 @@
       "protein": 26.0,
       "units": {}
     },
+    "ground beef lean": {
+      "aliases": [
+        "lean ground beef",
+        "93/7 ground beef",
+        "extra lean ground beef"
+      ],
+      "carb": 0.0,
+      "density": 1.0,
+      "fat": 7.0,
+      "fiber": 0.0,
+      "protein": 21.0,
+      "units": {}
+    },
     "ground turkey": {
       "aliases": [
         "turkey"
@@ -823,6 +922,23 @@
       "fiber": 0.3,
       "protein": 1.3,
       "units": {}
+    },
+    "lamb chop": {
+      "aliases": [
+        "lamb",
+        "lamb loin chop",
+        "rack of lamb",
+        "leg of lamb",
+        "ground lamb"
+      ],
+      "carb": 0.0,
+      "density": 1.0,
+      "fat": 17.0,
+      "fiber": 0.0,
+      "protein": 20.0,
+      "units": {
+        "chop": 100.0
+      }
     },
     "lard": {
       "aliases": [
@@ -1155,7 +1271,6 @@
     },
     "pork": {
       "aliases": [
-        "pork chop",
         "ground pork",
         "pork loin"
       ],
@@ -1165,6 +1280,21 @@
       "fiber": 0.0,
       "protein": 27.0,
       "units": {}
+    },
+    "pork chop": {
+      "aliases": [
+        "bone-in pork chop",
+        "boneless pork chop",
+        "pork loin chop"
+      ],
+      "carb": 0.0,
+      "density": 1.0,
+      "fat": 9.0,
+      "fiber": 0.0,
+      "protein": 23.0,
+      "units": {
+        "chop": 170.0
+      }
     },
     "pork rinds": {
       "aliases": [
@@ -1180,6 +1310,29 @@
       "units": {
         "cup": 30.0
       }
+    },
+    "pork shoulder": {
+      "aliases": [
+        "pork butt",
+        "boston butt",
+        "picnic shoulder",
+        "pulled pork"
+      ],
+      "carb": 0.0,
+      "density": 1.0,
+      "fat": 15.0,
+      "fiber": 0.0,
+      "protein": 18.0,
+      "units": {}
+    },
+    "pork tenderloin": {
+      "aliases": [],
+      "carb": 0.0,
+      "density": 1.0,
+      "fat": 3.5,
+      "fiber": 0.0,
+      "protein": 21.0,
+      "units": {}
     },
     "potato": {
       "aliases": [
@@ -1240,6 +1393,23 @@
       "fat": 0.5,
       "fiber": 3.7,
       "protein": 3.1
+    },
+    "ribeye": {
+      "aliases": [
+        "rib eye",
+        "ribeye steak",
+        "rib eye steak",
+        "ribeye roast",
+        "prime rib"
+      ],
+      "carb": 0.0,
+      "density": 1.0,
+      "fat": 18.0,
+      "fiber": 0.0,
+      "protein": 20.0,
+      "units": {
+        "steak": 340.0
+      }
     },
     "rice": {
       "aliases": [
@@ -1346,6 +1516,18 @@
       "protein": 18.0,
       "units": {}
     },
+    "short ribs": {
+      "aliases": [
+        "short rib",
+        "beef short ribs"
+      ],
+      "carb": 0.0,
+      "density": 1.0,
+      "fat": 25.0,
+      "fiber": 0.0,
+      "protein": 17.0,
+      "units": {}
+    },
     "shortening": {
       "aliases": [
         "vegetable shortening",
@@ -1369,6 +1551,21 @@
       "fiber": 0.0,
       "protein": 24.0,
       "units": {}
+    },
+    "sirloin steak": {
+      "aliases": [
+        "sirloin",
+        "top sirloin",
+        "sirloin tip"
+      ],
+      "carb": 0.0,
+      "density": 1.0,
+      "fat": 8.0,
+      "fiber": 0.0,
+      "protein": 22.0,
+      "units": {
+        "steak": 227.0
+      }
     },
     "sour cream": {
       "aliases": [],
@@ -1414,6 +1611,24 @@
       "protein": 0.7,
       "units": {
         "cup": 144.0
+      }
+    },
+    "strip steak": {
+      "aliases": [
+        "new york strip",
+        "ny strip",
+        "strip loin",
+        "porterhouse",
+        "t-bone",
+        "t bone"
+      ],
+      "carb": 0.0,
+      "density": 1.0,
+      "fat": 11.0,
+      "fiber": 0.0,
+      "protein": 22.0,
+      "units": {
+        "steak": 283.0
       }
     },
     "sugar": {
