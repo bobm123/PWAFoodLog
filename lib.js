@@ -14,7 +14,7 @@
   // App version, shown in Settings -> About. This is the single source of
   // truth: sw.js builds its cache name from it, so bumping this is what makes
   // installed copies pick up a new release. Bump it on every deploy.
-  var APP_VERSION = "1.4.2";
+  var APP_VERSION = "1.4.3";
 
   // ---------------------------------------------------------------------
   // High-glycemic / refined-carb ingredient watchlist.
@@ -412,7 +412,11 @@
     bone: 1, boneless: 1, skinless: 1, lean: 1, extra: 1, loin: 1, york: 1,
     // "meat" names a category, not a cut: via the "beef stew meat" alias a
     // stray "of meat, to" was claiming a 907 g chuck roast.
-    meat: 1, stew: 1, stewing: 1, roast: 1, braising: 1, chop: 1, steak: 1
+    meat: 1, stew: 1, stewing: 1, roast: 1, braising: 1, chop: 1, steak: 1,
+    // Position and page words. "top" arrives via the "top sirloin" alias and
+    // was matching the "Top of Form" marker left by a printed web page;
+    // "full" via "greek yogurt full fat", matching "Full Recipe List".
+    top: 1, bottom: 1, side: 1, full: 1, tip: 1, form: 1, list: 1, recipe: 1
   };
 
   /** Fuzzy-match free text to a table key. */

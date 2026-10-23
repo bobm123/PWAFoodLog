@@ -811,9 +811,20 @@ console.log("\n-- matcher rejects fragments --");
      L.matchIngredient(c[0], NDB));
 });
 
+[["top sirloin", "sirloin steak"], ["sirloin tip", "sirloin steak"],
+ ["greek yogurt full fat", "greek yogurt full fat"],
+ ["full fat greek yogurt", "greek yogurt full fat"]].forEach(function (c) {
+  ok(c[0] + " survives the position-word guard",
+     L.matchIngredient(c[0], NDB) === c[1], L.matchIngredient(c[0], NDB));
+});
+
 // Page furniture used to match baking soda at 5 g a line, silently padding
 // the totals of any recipe printed from a web page.
-["page 1 of 2", "bottom of form", "join thousands of fans on facebook"]
+// "Top of Form" matched via the "top sirloin" alias and "Full Recipe List"
+// via "greek yogurt full fat" -- a printed web page leaves both markers, and
+// each quietly added an ingredient to the totals.
+["page 1 of 2", "bottom of form", "top of form", "full recipe list",
+ "join thousands of fans on facebook"]
   .forEach(function (junk) {
   ok(JSON.stringify(junk) + " is not an ingredient",
      L.matchIngredient(junk, NDB) === null, L.matchIngredient(junk, NDB));
