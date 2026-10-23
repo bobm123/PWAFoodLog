@@ -831,6 +831,82 @@ console.log("\n-- matcher rejects fragments --");
 });
 
 
+console.log("\n-- ingredient list boundaries --");
+// A cookbook page extracted from a PDF has no "Ingredients" heading: the
+// sections are ALL-CAPS, the steps are numbered, and a nutrition panel plus
+// book marketing follows. The collector used to run to the end of the file,
+// so the method and the related-recipe links scored as food -- "4 quarts
+// water to boil in Dutch oven" entered one recipe as 3784 g of water.
+const PAGE = [
+  "Black Rice Bowls with Salmon",
+  "Serves 4",
+  "RICE AND DRESSING",
+  "1 1/2 cups black rice",
+  "1/4 cup rice vinegar",
+  "SALMON AND VEGETABLES",
+  "4 (4- to 6-ounce) skin-on salmon fillets",
+  "1 avocado, halved, pitted, and sliced thin",
+  "1. FOR THE RICE: Bring 4 quarts water to boil in Dutch oven over heat.",
+  "2. Whisk vinegar and mirin together in small bowl until smooth.",
+  "PER SERVING",
+  "Cal 540; Total Fat 18g; Sat Fat 2.5g",
+  "BUY THE BOOK",
+  "Full Recipe List",
+  "Chocolate-Avocado Pudding",
+  "Sign up for our cooking newsletter",
+  "Top of Form"
+].join("\n");
+
+const LINES = L.recipeLines(PAGE);
+ok("the numbered method is not collected",
+   !LINES.some(function (l) { return /Dutch oven|Whisk vinegar/.test(l); }),
+   LINES.filter(function (l) { return /Dutch oven|Whisk/.test(l); }).join(" | "));
+ok("the nutrition panel is not collected",
+   !LINES.some(function (l) { return /^Cal 540|PER SERVING/.test(l); }));
+ok("trailing marketing is not collected",
+   !LINES.some(function (l) { return /BUY THE BOOK|newsletter|Top of Form|Recipe List/i.test(l); }),
+   LINES.join(" | "));
+ok("an ALL-CAPS sub-heading is not an ingredient",
+   !LINES.some(function (l) { return /^(RICE AND DRESSING|SALMON AND VEGETABLES)$/.test(l); }));
+// The real list must survive all of that.
+ok("the ingredients themselves are kept",
+   LINES.some(function (l) { return /black rice/.test(l); }) &&
+   LINES.some(function (l) { return /salmon fillets/.test(l); }) &&
+   LINES.some(function (l) { return /avocado/.test(l); }),
+   LINES.join(" | "));
+
+// The document states 540 kcal per serving, which the parser no longer reads
+// as an ingredient -- so it is an independent check on the arithmetic.
+const BOWL = L.analyzeRecipeText(PAGE, 4, NDB);
+ok("per-serving lands near the figure the page states",
+   Math.abs(BOWL.perServing.kcal - 540) < 120,
+   Math.round(BOWL.perServing.kcal) + " vs 540");
+
+// A numbered line is only a step when it reads like one: an ingredient list
+// is sometimes numbered too, and a short "1. Dough" is a sub-heading.
+ok("a numbered ingredient is still an ingredient",
+   L.recipeLines("Cake\n1. 2 cups flour\n2. 3 eggs")
+    .some(function (l) { return /flour/.test(l); }));
+// A capital is required after the number, so "2 eggs" is never a step.
+ok("a quantity line is never read as a step",
+   L.recipeLines("Cake\n2 eggs\n1 cup milk").length === 2);
+
+// An ALL-CAPS line carrying a digit may be a real ingredient, so the heading
+// rule must not touch it. Measured over the corpus: of 179 distinct ALL-CAPS
+// lines none carried a unit, but a shouted ingredient list is still possible.
+ok("a shouted ingredient is kept",
+   L.recipeLines("Cake\n2 CUPS FLOUR\n1 TSP SALT").length === 2,
+   JSON.stringify(L.recipeLines("Cake\n2 CUPS FLOUR\n1 TSP SALT")));
+
+// The explicit-header path is how 57 of the 89 corpus files parse; the new
+// boundaries must not disturb it.
+const HEADERED = L.recipeLines(
+  ["Shortbread", "Ingredients", "2 cups flour", "1 cup butter",
+   "Instructions", "Cream the butter and sugar together until light."].join("\n"));
+ok("an explicit Ingredients section still works",
+   HEADERED.length === 2 && /flour/.test(HEADERED[0]), JSON.stringify(HEADERED));
+
+
 console.log("\n-- app version --");
 ok("APP_VERSION is semver", /^\d+\.\d+\.\d+$/.test(L.APP_VERSION), L.APP_VERSION);
 

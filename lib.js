@@ -14,7 +14,7 @@
   // App version, shown in Settings -> About. This is the single source of
   // truth: sw.js builds its cache name from it, so bumping this is what makes
   // installed copies pick up a new release. Bump it on every deploy.
-  var APP_VERSION = "1.4.3";
+  var APP_VERSION = "1.5.0";
 
   // ---------------------------------------------------------------------
   // High-glycemic / refined-carb ingredient watchlist.
@@ -368,6 +368,49 @@
 
   var SECTION_STOP = /^\s*(preparation|method|instructions?|directions?|steps?)\b/i;
   var SECTION_START = /^\s*(ingredients?|for the .+)\s*:?\s*$/i;
+
+  // 32 of the 89 corpus files never write the word "Instructions": the steps
+  // simply start, numbered. That numbering is the boundary -- without it the
+  // collector ran past the list and scored the method as ingredients, which
+  // is how "4 quarts water to boil in Dutch oven" became 3784 g of water.
+  //
+  // Requires a capital after the number, so an ingredient line that happens
+  // to be numbered ("1. 5 oz butter") is never mistaken for a step. A real
+  // step also runs on; a short "1. Dough" is a sub-heading, not a method.
+  var NUMBERED_STEP = /^\s*\d{1,2}\s*[.)]\s+[A-Z]/;
+
+  function looksLikeStep(line) {
+    var ln = String(line || "").trim();
+    return NUMBERED_STEP.test(ln) && ln.length > 24;
+  }
+
+  // A sub-heading inside the ingredient list: "RICE AND DRESSING", "FOR THE
+  // SAUCE". These were being scored as food -- the salmon recipe's two
+  // headers each entered the totals as a 5 g assumed ingredient.
+  //
+  // Requires no digit, so "2 CUPS FLOUR" can never be dropped. Measured over
+  // the corpus: of 179 distinct ALL-CAPS lines, none carried a unit word, so
+  // this costs no real ingredient.
+  var CAPS_HEADING = /^[A-Z][A-Z \u2019'&\/()-]{2,40}$/;
+
+  function looksLikeHeading(line) {
+    var ln = String(line || "").trim();
+    return CAPS_HEADING.test(ln) && !/\d/.test(ln);
+  }
+
+  // Everything a print stylesheet leaves after the recipe: the nutrition
+  // panel, then book marketing, related-recipe links and footer forms. Once
+  // one of these appears the recipe is over, so collection stops for good.
+  var TRAILER = new RegExp(
+    "^\s*(" +
+    "per serving|nutrition( (facts|information))?|amount per serving|" +
+    "excellent source of|good source of|calories per|" +
+    "turbocharge your|buy the book|sign up|subscribe|" +
+    "full recipe list|recipes to make now|related recipes?|you may also|" +
+    "more from|about (the author|america|our)|media information|" +
+    "how we use your email|top of form|bottom of form|" +
+    "print this|share this|rate this|leave a (comment|review)" +
+    ")\b", "i");
 
   function normalizeUnit(word) {
     var w = String(word || "").toLowerCase().replace(/^[.,]+|[.,]+$/g, "");
@@ -772,8 +815,11 @@
 
     for (i = 0; i < lines.length; i++) {
       ln = lines[i];
-      if (SECTION_STOP.test(ln)) { collecting = false; continue; }
+      // A trailer means the recipe is over, not that a new section began.
+      if (TRAILER.test(ln)) break;
+      if (SECTION_STOP.test(ln) || looksLikeStep(ln)) { collecting = false; continue; }
       if (SECTION_START.test(ln)) { collecting = true; sawHeader = true; continue; }
+      if (looksLikeHeading(ln)) continue;          // "FOR THE SAUCE"
       if (collecting && ln.trim()) out.push(ln.trim());
     }
 
@@ -788,8 +834,12 @@
       for (i = 0; i < lines.length; i++) {
         ln = lines[i];
         if (!ln.trim()) continue;
-        if (SECTION_STOP.test(ln)) break;
+        // Without a header the list ends at whichever comes first: the word
+        // "Instructions", the first numbered step, or the nutrition panel
+        // and the marketing that follows it.
+        if (SECTION_STOP.test(ln) || looksLikeStep(ln) || TRAILER.test(ln)) break;
         if (!started) { started = true; continue; }   // skip the title
+        if (looksLikeHeading(ln)) continue;          // "RICE AND DRESSING"
         out.push(ln.trim());
       }
     }
