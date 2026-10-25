@@ -218,6 +218,7 @@ ok("no servings -> plain serving label",
 
 console.log("\n-- recipe text parsing (OCR-tolerant) --");
 const NDB = require("./nutrition-db.js").DB;
+const ADB = require("./additives-db.js").DB;
 
 // Vulgar fractions: iOS Live Text emits these, and dropping one turns a
 // quantity into a 5 g pinch -- a confidently wrong number, not a visible error.
@@ -906,6 +907,99 @@ const HEADERED = L.recipeLines(
 ok("an explicit Ingredients section still works",
    HEADERED.length === 2 && /flour/.test(HEADERED[0]), JSON.stringify(HEADERED));
 
+
+console.log("\n-- additive ovals --");
+// Open Food Facts gives bare codes ("en:e322"), which mean nothing to someone
+// holding the jar in a shop. Each becomes an oval with a detail card behind it.
+const LEC = L.additiveInfo("en:e322");
+ok("a tag resolves to a named additive",
+   LEC && LEC.code === "E322" && LEC.name === "Lecithin" && LEC.known);
+ok("the card has a role and a description",
+   LEC.role === "Emulsifier" && LEC.detail.length > 20, LEC.role);
+
+// Roman-numeral sub-variants name a specific salt or isomer. They share the
+// parent's description and have no Wikipedia article, so they fold onto it.
+ok("e322i folds onto E322", L.additiveCode("en:e322i") === "E322");
+ok("e500ii folds onto E500", L.additiveCode("en:e500ii") === "E500");
+ok("E450III folds onto E450", L.additiveCode("E450III") === "E450");
+// ...but a trailing letter that is PART of the code must survive.
+ok("E150C keeps its letter", L.additiveCode("en:e150c") === "E150C");
+ok("E160A keeps its letter", L.additiveCode("en:e160a") === "E160A");
+ok("E927A keeps its letter", L.additiveCode("e927a") === "E927A");
+
+ok("a non-E-number tag is ignored", L.additiveCode("en:palm-oil") === "");
+ok("an empty tag is ignored", L.additiveInfo("") === null);
+
+// An unknown code must still be shown: a shopper can look it up even if we
+// have no description, so it gets the E-number index rather than vanishing.
+const UNK = L.additiveInfo("en:e1510");
+ok("an unknown code still resolves", UNK && UNK.code === "E1510" && !UNK.known);
+ok("an unknown code links to the E-number index",
+   UNK.url === L.E_NUMBER_WIKI, UNK.url);
+
+// Every link must point at a real article. These titles were checked against
+// the Wikipedia API -- guessing would send a shopper to a 404 mid-aisle.
+ok("a known additive links to its own article",
+   LEC.url === "https://en.wikipedia.org/wiki/Lecithin", LEC.url);
+ok("a redirect-prone name uses the verified title",
+   L.additiveInfo("en:e133").url ===
+     "https://en.wikipedia.org/wiki/Brilliant_blue_FCF",
+   L.additiveInfo("en:e133").url);
+ok("a plural-named additive uses the singular article",
+   L.additiveInfo("en:e500").url ===
+     "https://en.wikipedia.org/wiki/Sodium_carbonate",
+   L.additiveInfo("en:e500").url);
+// No link may contain a space: those break when pasted.
+(function () {
+  const bad = [];
+  Object.keys(ADB).forEach(function (code) {
+    const u = L.additiveInfo("en:" + code.toLowerCase()).url;
+    if (/\s/.test(u) || !/^https:\/\/en\.wikipedia\.org\//.test(u)) bad.push(code);
+  });
+  ok("every additive link is a well-formed wikipedia url", bad.length === 0,
+     bad.join(", "));
+})();
+
+// The product card renders this list directly.
+const OVALS = L.additiveList({ additives: ["en:e322", "en:e322i", "en:e1510", "en:e330"] });
+ok("variants collapse to one oval", OVALS.length === 3,
+   JSON.stringify(OVALS.map(function (o) { return o.code; })));
+ok("named additives sort before unknown ones",
+   OVALS[OVALS.length - 1].code === "E1510",
+   JSON.stringify(OVALS.map(function (o) { return o.code; })));
+ok("a product with no additives yields no ovals",
+   L.additiveList({ additives: [] }).length === 0);
+ok("a product missing the field is handled", L.additiveList({}).length === 0);
+
+// The table is the thing a card reads; a malformed row would render blank.
+(function () {
+  const bad = [];
+  Object.keys(ADB).forEach(function (code) {
+    const r = ADB[code];
+    if (!/^E\d+[A-Z]*$/.test(code)) bad.push(code + " (code)");
+    else if (!Array.isArray(r) || r.length < 3 || r.length > 4) bad.push(code + " (shape)");
+    else if (r.slice(0, 3).some(function (x) { return typeof x !== "string" || !x; }))
+      bad.push(code + " (empty field)");
+  });
+  ok("every table row is well-formed", bad.length === 0, bad.join(", "));
+})();
+
+
+// A script the page loads but the worker does not precache works online and
+// breaks offline -- the failure only shows up on a phone in a shop.
+(function () {
+  const fs = require("fs");
+  const html = fs.readFileSync("index.html", "utf8");
+  const sw = fs.readFileSync("sw.js", "utf8");
+  const srcs = (html.match(/<script src="([^"]+)"/g) || [])
+    .map(function (m) { return m.replace(/.*src="/, "").replace(/"$/, ""); })
+    .filter(function (u) { return !/^https?:/.test(u); });
+  const missing = srcs.filter(function (u) {
+    return sw.indexOf('"./' + u + '"') === -1;
+  });
+  ok("every local script is precached by the service worker",
+     missing.length === 0, missing.join(", "));
+})();
 
 console.log("\n-- app version --");
 ok("APP_VERSION is semver", /^\d+\.\d+\.\d+$/.test(L.APP_VERSION), L.APP_VERSION);

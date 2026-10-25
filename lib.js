@@ -14,7 +14,7 @@
   // App version, shown in Settings -> About. This is the single source of
   // truth: sw.js builds its cache name from it, so bumping this is what makes
   // installed copies pick up a new release. Bump it on every deploy.
-  var APP_VERSION = "1.5.0";
+  var APP_VERSION = "1.6.0";
 
   // ---------------------------------------------------------------------
   // High-glycemic / refined-carb ingredient watchlist.
@@ -1620,6 +1620,106 @@
    * Each row carries the portion choices the table knows about, so the UI can
    * offer small/medium/large rather than demanding grams.
    */
+  // ----------------------------------------------------------- additives
+  //
+  // Open Food Facts gives bare codes ("en:e322"), which mean nothing to a
+  // shopper holding the jar. additiveInfo turns one into something a detail
+  // card can show, and always returns a link: an unknown code is still worth
+  // looking up, so it gets the E-number article rather than being dropped.
+
+  var E_WIKI = "https://en.wikipedia.org/wiki/E_number";
+
+  /**
+   * The E-number table, resolved on first use.
+   *
+   * index.html loads lib.js BEFORE additives-db.js, so the global does not
+   * exist yet at load time; looking it up lazily keeps that order free and
+   * keeps lib.js dependency-free for the Node tests, where the table is
+   * required instead. Missing entirely is fine -- every code then falls back
+   * to the E-number index link.
+   */
+  var _additives = null;
+  function additiveTable() {
+    if (_additives) return _additives;
+    if (typeof module !== "undefined" && module.exports) {
+      try { _additives = require("./additives-db.js").DB; } catch (e) { _additives = {}; }
+    } else {
+      _additives = (root.AdditivesDB && root.AdditivesDB.DB) || {};
+    }
+    return _additives;
+  }
+
+  /**
+   * Normalise a tag to its base E-number.
+   *
+   * Tags arrive as "en:e322", sometimes with a roman-numeral sub-variant
+   * ("e322i", "e500ii") naming a specific salt or isomer. Those share the
+   * parent's description and have no Wikipedia anchor of their own, so they
+   * fold onto the base code. Returns "" for anything that is not an
+   * E-number, since OFF occasionally carries other tag shapes.
+   */
+  function additiveCode(tag) {
+    var t = String(tag == null ? "" : tag)
+              .replace(/^en:/i, "").replace(/[^a-z0-9]/gi, "").toUpperCase();
+    var m = /^E(\d{3,4})([A-Z]*)$/.exec(t);
+    if (!m) return "";
+    // Keep a trailing letter that is part of the code (E150C, E160A, E927A)
+    // but drop a roman-numeral variant (E322I, E450III). "C" and "A" are
+    // also roman-ish, so only treat it as a variant when the base code plus
+    // letter is unknown while the base code alone is known.
+    var base = "E" + m[1], suffix = m[2];
+    if (!suffix) return base;
+    var full = base + suffix;
+    var tbl = additiveTable();
+    if (tbl[full]) return full;
+    if (/^[IVX]+$/.test(suffix) && tbl[base]) return base;
+    return tbl[base] ? base : full;
+  }
+
+  /**
+   * What to show for one additive tag.
+   *
+   * `known` says whether we have a description; the card uses it to decide
+   * between showing the text and saying plainly that we do not have it.
+   */
+  function additiveInfo(tag) {
+    var code = additiveCode(tag);
+    if (!code) return null;
+    var rec = additiveTable()[code];
+    return {
+      code: code,
+      name: rec ? rec[0] : "",
+      role: rec ? rec[1] : "",
+      detail: rec ? rec[2] : "",
+      known: !!rec,
+      // A known additive links straight to its article -- the title was
+      // checked against Wikipedia, so this does not 404. An unknown code
+      // gets the E-number index, which lists every code in a table, so the
+      // oval is still worth tapping.
+      url: rec ? "https://en.wikipedia.org/wiki/" +
+                 encodeURIComponent(String(rec[3] || rec[0]).replace(/ /g, "_"))
+               : E_WIKI
+    };
+  }
+
+  /** Every additive on a product, de-duplicated, ready to render as ovals. */
+  function additiveList(product) {
+    var tags = (product && product.additives) || [];
+    var seen = {}, out = [];
+    for (var i = 0; i < tags.length; i++) {
+      var info = additiveInfo(tags[i]);
+      if (!info || seen[info.code]) continue;
+      seen[info.code] = true;
+      out.push(info);
+    }
+    // Named ones first: they are the ones a shopper can act on.
+    out.sort(function (a, b) {
+      if (a.known !== b.known) return a.known ? -1 : 1;
+      return a.code.localeCompare(b.code, "en", { numeric: true });
+    });
+    return out;
+  }
+
   function searchGenericFoods(query, db) {
     var q = String(query || "").toLowerCase().trim();
     if (q.length < 2 || !db) return [];
@@ -2064,6 +2164,10 @@
     brandsForStores: brandsForStores,
     filterToStores: filterToStores,
     searchGenericFoods: searchGenericFoods,
+    additiveCode: additiveCode,
+    additiveInfo: additiveInfo,
+    additiveList: additiveList,
+    E_NUMBER_WIKI: E_WIKI,
     searchProducts: searchProducts,
     OFF_URL: function (code) {
       return "https://world.openfoodfacts.org/api/v2/product/" +

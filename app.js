@@ -481,7 +481,7 @@
       (productDetailOpen
         ? '<div class="fdetail">' + detailRowsHtml(p, servFull) + "</div>"
         : "") +
-      (p.additives.length ? '<p class="hint">Additives: ' + esc(p.additives.join(", ")) + "</p>" : "") +
+      additivesHtml(p) +
       flagWarnBox(p.flags) +
       (L.hasNutrition(p) ? "" :
         '<div class="nofacts">' +
@@ -736,6 +736,7 @@
       lastCode = code;
       // Open it as its own page so it is not buried under search results.
       productDetailOpen = false;
+      openAdditive = null;      // a new product starts with no card open
       enterSearchDetail();
       renderFallback(code, L.ERR.NOT_A_GTIN);
       window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });
@@ -1094,6 +1095,56 @@
       status($("searchStatus"),
         r.message || (added + " more from Open Food Facts."), r.error ? "warn" : "");
     });
+  }
+
+  // ------------------------------------------------------- additive ovals
+  //
+  // A bare "Additives: E322, E450" tells a shopper nothing while they are
+  // standing in the aisle. Each code becomes a tappable oval; tapping one
+  // opens a card with the name, what the additive does, and a Wikipedia
+  // link for digging further.
+
+  var openAdditive = null;   // code whose card is showing, or null
+
+  function additivesHtml(p) {
+    var list = L.additiveList(p);
+    if (!list.length) return "";
+    var chips = list.map(function (a) {
+      return '<button class="addchip' + (a.code === openAdditive ? " on" : "") +
+        (a.known ? "" : " unk") + '" data-additive="' + esc(a.code) +
+        '" aria-expanded="' + (a.code === openAdditive ? "true" : "false") +
+        '">' + esc(a.code) +
+        (a.known ? '<span class="addname">' + esc(a.name) + "</span>" : "") +
+        "</button>";
+    }).join("");
+
+    var open = null;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].code === openAdditive) { open = list[i]; break; }
+    }
+    return '<p class="hint" style="margin:.5rem 0 .1rem">Additives ' +
+             '<span class="addname">tap for details</span></p>' +
+           '<div class="addgrid">' + chips + "</div>" +
+           (open ? additiveCardHtml(open) : "");
+  }
+
+  function additiveCardHtml(a) {
+    return '<div class="addcard">' +
+      '<button class="addclose" data-additive-close="1" ' +
+        'aria-label="Close additive details">&times;</button>' +
+      "<h4>" + esc(a.code) + (a.known ? " &middot; " + esc(a.name) : "") + "</h4>" +
+      (a.known
+        ? '<span class="addrole">' + esc(a.role) + "</span><p>" + esc(a.detail) + "</p>"
+        : "<p>This app has no description for this one. The E-number index " +
+          "on Wikipedia lists every code.</p>") +
+      '<a href="' + esc(a.url) + '" target="_blank" rel="noopener noreferrer">' +
+        (a.known ? "Read about " + esc(a.name) : "E-number index") +
+        " on Wikipedia &rarr;</a></div>";
+  }
+
+  function toggleAdditive(code) {
+    openAdditive = (openAdditive === code) ? null : code;
+    if (currentProduct) renderProduct(currentProduct, currentProductStale);
   }
 
   function toggleProductDetail() {
@@ -2473,6 +2524,8 @@
       if (!b) return;
       if (b.dataset.del) S.del("entries", Number(b.dataset.del)).then(renderToday);
       else if (b.dataset.delfood) S.del("foods", b.dataset.delfood).then(renderFoods);
+      else if (b.dataset.additive) toggleAdditive(b.dataset.additive);
+      else if (b.dataset.additiveClose) toggleAdditive(openAdditive);
       else if (b.dataset.store) toggleStore(b.dataset.store);
       else if (b.id === "btnClearStores") {
         myStores = [];
