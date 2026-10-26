@@ -481,7 +481,7 @@
       (productDetailOpen
         ? '<div class="fdetail">' + detailRowsHtml(p, servFull) + "</div>"
         : "") +
-      additivesHtml(p) +
+      additivesHtml(p, "p") +
       flagWarnBox(p.flags) +
       (L.hasNutrition(p) ? "" :
         '<div class="nofacts">' +
@@ -1104,23 +1104,28 @@
   // opens a card with the name, what the additive does, and a Wikipedia
   // link for digging further.
 
-  var openAdditive = null;   // code whose card is showing, or null
+  // Which card is open, as "<owner>|<code>". The Foods tab shows many foods
+  // at once, so a bare code would open the same card on every row that
+  // happens to share an additive. The product page passes owner "p".
+  var openAdditive = null;
 
-  function additivesHtml(p) {
+  function additivesHtml(p, owner) {
     var list = L.additiveList(p);
     if (!list.length) return "";
+    owner = owner || "p";
     var chips = list.map(function (a) {
-      return '<button class="addchip' + (a.code === openAdditive ? " on" : "") +
-        (a.known ? "" : " unk") + '" data-additive="' + esc(a.code) +
-        '" aria-expanded="' + (a.code === openAdditive ? "true" : "false") +
-        '">' + esc(a.code) +
+      var key = owner + "|" + a.code;
+      var on = key === openAdditive;
+      return '<button class="addchip' + (on ? " on" : "") +
+        (a.known ? "" : " unk") + '" data-additive="' + esc(key) +
+        '" aria-expanded="' + (on ? "true" : "false") + '">' + esc(a.code) +
         (a.known ? '<span class="addname">' + esc(a.name) + "</span>" : "") +
         "</button>";
     }).join("");
 
     var open = null;
     for (var i = 0; i < list.length; i++) {
-      if (list[i].code === openAdditive) { open = list[i]; break; }
+      if (owner + "|" + list[i].code === openAdditive) { open = list[i]; break; }
     }
     return '<p class="hint" style="margin:.5rem 0 .1rem">Additives ' +
              '<span class="addname">tap for details</span></p>' +
@@ -1142,9 +1147,15 @@
         " on Wikipedia &rarr;</a></div>";
   }
 
-  function toggleAdditive(code) {
-    openAdditive = (openAdditive === code) ? null : code;
-    if (currentProduct) renderProduct(currentProduct, currentProductStale);
+  function toggleAdditive(key) {
+    openAdditive = (openAdditive === key) ? null : key;
+    // The ovals appear on the product page and on the Foods tab, so re-render
+    // whichever is showing rather than assuming the product page.
+    if (String(key || "").indexOf("p|") === 0) {
+      if (currentProduct) renderProduct(currentProduct, currentProductStale);
+    } else {
+      renderFoods();
+    }
   }
 
   function toggleProductDetail() {
@@ -1354,6 +1365,9 @@
 
   function foodDetailRows(f) {
     return '<div class="fdetail">' + detailRowsHtml(f) +
+      // Same ovals as the scan page: the record already carries the codes,
+      // they were just never shown once the food was saved.
+      additivesHtml(f, "f" + f.id) +
       missingDataNote(f, f.id) +
       '<div class="acts" style="margin-top:.5rem">' +
         '<button class="ghost tiny" data-editfood="' + esc(f.id) + '">Edit details</button>' +

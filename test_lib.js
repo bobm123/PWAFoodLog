@@ -1001,6 +1001,27 @@ ok("a product missing the field is handled", L.additiveList({}).length === 0);
      missing.length === 0, missing.join(", "));
 })();
 
+// The Foods tab shows many foods at once, so the open additive card is keyed
+// "<owner>|<code>" -- a bare code would open the same card on every row that
+// shares an additive, and tapping E338 on one cola would light up the other.
+// That key is only unique because a saved food's id is.
+ok("a saved food id is derived from its barcode",
+   L.foodFromProduct({ code: "5449000214799", name: "Coke Zero" }).id ===
+     "product:5449000214799");
+ok("two different products get different ids",
+   L.foodFromProduct({ code: "5449000214799", name: "A" }).id !==
+   L.foodFromProduct({ code: "5449000000996", name: "B" }).id);
+// A code never contains the separator, so "<id>|<code>" cannot be ambiguous.
+(function () {
+  const bad = Object.keys(ADB).filter(function (c) { return c.indexOf("|") !== -1; });
+  ok("no additive code contains the key separator", bad.length === 0, bad.join(", "));
+})();
+// Saving a product must carry the codes through, or the Foods tab has
+// nothing to show.
+ok("a saved food keeps its additives",
+   L.foodFromProduct({ code: "1", name: "x", additives: ["E330", "E322"] })
+     .additives.length === 2);
+
 console.log("\n-- app version --");
 ok("APP_VERSION is semver", /^\d+\.\d+\.\d+$/.test(L.APP_VERSION), L.APP_VERSION);
 
