@@ -1075,6 +1075,96 @@ ok("prose with a number is not an amount",
 ok("a bare ingredient is not an amount", !L.statesAnAmount("Salt and pepper"));
 
 
+console.log("\n-- amounts stranded from their ingredient --");
+// A narrow print column breaks "16 tablespoons unsalted butter" in two. The
+// quantity and its unit end up alone, and the food lands on the next line.
+const WRAPPED = L.recipeLines(
+  "Blueberry Scones\nINGREDIENTS\n" +
+  "16 tablespoons\nunsalted butter (2\nsticks), frozen whole\n" +
+  "2 cups\nunbleached all purpose our (10 ounces)\n" +
+  "1/2 cup whole milk\n");
+ok("a stranded amount is rejoined with its food",
+   WRAPPED.indexOf("16 tablespoons unsalted butter (2") !== -1,
+   JSON.stringify(WRAPPED));
+ok("a second stranded amount is rejoined too",
+   WRAPPED.some(function (s) { return /^2 cups unbleached/.test(s); }),
+   JSON.stringify(WRAPPED));
+ok("an already-correct line is untouched",
+   WRAPPED.indexOf("1/2 cup whole milk") !== -1, JSON.stringify(WRAPPED));
+
+// The whole point: the heaviest ingredients come back, so the totals stop
+// being a quarter of the truth.
+const SCONES = L.analyzeRecipeText(
+  "Blueberry Scones\nINGREDIENTS\n" +
+  "16 tablespoons\nunsalted butter (2\nsticks), frozen whole\n" +
+  "1 1/2 cups fresh blueberries\n1/2 cup whole milk\n1/2 cup sour cream\n" +
+  "2 cups\nunbleached all purpose our (10 ounces)\n" +
+  "1/2 cup sugar\n2 teaspoons baking powder\n1/2 teaspoon table salt\n",
+  8, NDB);
+const sconeButter = SCONES.rows.filter(function (r) { return r.dbKey === "butter"; })[0];
+ok("the wrapped butter weighs a real amount, not a pinch",
+   !!sconeButter && sconeButter.grams > 200, JSON.stringify(sconeButter));
+ok("a rejoined recipe is not flagged as lost",
+   SCONES.lostIngredients === null, JSON.stringify(SCONES.lostIngredients));
+
+console.log("\n-- a tabular recipe must NOT be rejoined --");
+// "Ingredient / Amount / Scaled amount" puts the food ABOVE its quantity and
+// adds a second, doubled column. Pairing each amount with the line below
+// shifts every ingredient onto a neighbour's number.
+const TABLE = L.recipeLines(
+  "Grandma's Cookies\nIngredient\nAmount\nScaled amount\n" +
+  "Sugar\n1\ncup\n2\ncups\nButter\n1\ncup\n2\ncup\nFlour\n3\ncups\n6\ncups\n");
+ok("a table's amounts are not glued to the next ingredient",
+   !TABLE.some(function (s) { return /^\d+\s*cups?\s+\w/i.test(s); }),
+   JSON.stringify(TABLE));
+
+console.log("\n-- hyphen-numbered steps --");
+// "6- Stir in 1/2 cup coconut." is a method step, and mining it for
+// ingredients counted the coconut a second time.
+ok("a hyphen-numbered step is cut",
+   L.recipeLines("Bread\nINGREDIENTS\n1 cup sugar\n" +
+     "6- Stir in 1/2 cup coconut.\n").indexOf("6- Stir in 1/2 cup coconut.") === -1);
+ok("a hyphen step with no space is cut",
+   L.recipeLines("Bread\nINGREDIENTS\n1 cup sugar\n" +
+     "1-Lightly spoon flour into dry measuring cups; level it.\n").length === 1);
+// An amount range opens the same way and must survive.
+ok("an amount range is kept",
+   L.recipeLines("Chili\nINGREDIENTS\n1-2 cloves garlic, minced\n")
+     .indexOf("1-2 cloves garlic, minced") !== -1);
+ok("a decimal amount range is kept",
+   L.recipeLines("Chili\nINGREDIENTS\n1-1.5 lbs ground beef\n")
+     .indexOf("1-1.5 lbs ground beef") !== -1);
+
+console.log("\n-- a lost amount warns on its own --");
+// The ratio trigger can stay comfortably high while a single ingredient
+// loses its quantity outright, so a lost amount is its own trigger.
+// Four of five amounts land here, so the ratio trigger stays quiet. The
+// fifth states its amount AFTER the ingredient, where the parser finds no
+// leading quantity and falls back to a pinch -- the loss the ratio misses.
+const PINCHED = L.analyzeRecipeText(
+  "Bread\nINGREDIENTS\n" +
+  "2 cups sugar\n1/2 cup water\n1 teaspoon salt\n1 tablespoon butter\n" +
+  "flaked coconut, about 1/2 cup\n",
+  4, NDB);
+ok("a lost quantity warns even when the ratio is high",
+   !!PINCHED.lostIngredients, JSON.stringify(PINCHED.lostIngredients));
+ok("the flag records the lost amount",
+   !!PINCHED.lostIngredients && PINCHED.lostIngredients.pinched === 1,
+   JSON.stringify(PINCHED.lostIngredients));
+ok("the ratio alone would not have warned",
+   PINCHED.lostIngredients.used / PINCHED.lostIngredients.measured >= 0.5,
+   JSON.stringify(PINCHED.lostIngredients));
+// An unconvertible container unit is a table gap, not a lost amount: the
+// quantity was read, so the banner would cry wolf.
+const PACKAGE = L.analyzeRecipeText(
+  "Cookies\nINGREDIENTS\n" +
+  "1 package (8 oz.) cream cheese\n2 cups all-purpose flour\n" +
+  "1 cup sugar\n1/2 cup butter\n1 teaspoon vanilla extract\n",
+  8, NDB);
+ok("an unknown container unit does not warn",
+   PACKAGE.lostIngredients === null, JSON.stringify(PACKAGE.lostIngredients));
+
+
 console.log("\n-- app version --");
 ok("APP_VERSION is semver", /^\d+\.\d+\.\d+$/.test(L.APP_VERSION), L.APP_VERSION);
 

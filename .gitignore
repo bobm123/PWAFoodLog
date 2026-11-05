@@ -4,6 +4,7 @@ Thumbs.db
 *.swp
 .vscode/
 .idea/
+.claude/
 
 # Node (only used for running test_lib.js; no deps are required)
 node_modules/

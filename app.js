@@ -1767,11 +1767,18 @@
       lost =
         '<div class="warnbox">' +
           "<h3>These numbers are too low</h3>" +
-          '<p class="flagnote">The text states ' + li.measured +
-            " amounts but only " + li.used + " came through, so most " +
-            "ingredients are counted as a pinch. That usually means the " +
-            "amounts sit in a separate column or line from their " +
-            "ingredient, which this reader can't follow." +
+          '<p class="flagnote">' + (li.pinched
+            ? (li.pinched === 1 ? "An ingredient lists" : li.pinched +
+                 " ingredients list") + " an amount that didn't come " +
+              "through, so " + (li.pinched === 1 ? "it is" : "they are") +
+              " counted as a pinch. That usually means the amount sits in " +
+              "a separate column or line from its ingredient, which this " +
+              "reader can't follow."
+            : "The text states " + li.measured + " amounts but only " +
+              li.used + " came through, so most ingredients are counted " +
+              "as a pinch. That usually means the amounts sit in a " +
+              "separate column or line from their ingredient, which this " +
+              "reader can't follow.") +
           "</p>" +
           '<p class="flagnote">Paste the ingredients one per line, each ' +
             "starting with its amount &mdash; <em>2 cups flour</em> &mdash; " +

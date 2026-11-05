@@ -14,7 +14,7 @@
   // App version, shown in Settings -> About. This is the single source of
   // truth: sw.js builds its cache name from it, so bumping this is what makes
   // installed copies pick up a new release. Bump it on every deploy.
-  var APP_VERSION = "1.8.0";
+  var APP_VERSION = "1.8.1";
 
   // ---------------------------------------------------------------------
   // High-glycemic / refined-carb ingredient watchlist.
@@ -374,10 +374,16 @@
   // collector ran past the list and scored the method as ingredients, which
   // is how "4 quarts water to boil in Dutch oven" became 3784 g of water.
   //
-  // Requires a capital after the number, so an ingredient line that happens
-  // to be numbered ("1. 5 oz butter") is never mistaken for a step. A real
-  // step also runs on; a short "1. Dough" is a sub-heading, not a method.
-  var NUMBERED_STEP = /^\s*\d{1,2}\s*[.)]\s+[A-Z]/;
+  // Matches "1. Combine", "2) Place", and the hyphen form "6- Stir" or
+  // "6-Lightly" -- one corpus file numbers its whole method that way, and
+  // the steps were mined for ingredients, counting its coconut twice.
+  //
+  // A letter must follow the number, so an ingredient line that happens to
+  // be numbered ("1. 5 oz butter") is never mistaken for a step, and an
+  // amount range ("1-2 cloves garlic") is kept: a digit after the hyphen
+  // is a range, not a step. A real step also runs on, so looksLikeStep
+  // adds a length floor; a short "1. Dough" is a sub-heading, not a method.
+  var NUMBERED_STEP = /^\s*\d{1,2}\s*(?:[.)]\s+|-\s*)[A-Za-z]/;
 
   function looksLikeStep(line) {
     var ln = String(line || "").trim();
@@ -732,6 +738,59 @@
     return out;
   }
 
+  // "16 tablespoons" standing alone, with its food on the next line. The
+  // mirror image of joinStrandedQuantities: there the number was orphaned
+  // from its unit, here the number AND unit are orphaned from the food. A
+  // narrow print column does this, and the ingredient then weighs a 5 g
+  // pinch while the heaviest thing in the recipe goes missing.
+  var QTY_UNIT_ONLY = new RegExp(
+    "^\\s*\\d+(?:\\s+\\d+/\\d+|\\s*/\\s*\\d+|\\.\\d+)?\\s*" +
+    "(?:cups?|tablespoons?|teaspoons?|tbsps?|tbs|tsps?|ounces?|oz|pounds?|" +
+    "lbs?|grams?|g|kg|ml|liters?|cloves?|slices?|quarts?|pints?|sticks?)" +
+    "\\s*[.,]?\\s*$", "i");
+
+  // The nutrition panel is laid out the same way -- "13g" above
+  // "saturatedfat" -- so rejoining blindly would invent ingredients out
+  // of a facts table. A nutrient name is not a food.
+  var NUTRIENT_WORD = new RegExp(
+    "^(?:total)?(?:saturated|trans|poly|mono)?" +
+    "(?:fat|carbohydrates?|carbs?|sugars?|protein|cholesterol|sodium|" +
+    "calcium|iron|potassium|fiber|fibre|dietaryfiber|calories|kcal|" +
+    "vitamin[a-z]?|servingsize|servings?)$", "i");
+
+  // A column header from a recipe laid out as a table.
+  var TABLE_HEADER =
+    /^(scaled\s+amount|amount|ingredients?|qty|quantity|measure)$/i;
+
+  function joinStrandedAmounts(lines) {
+    // A recipe laid out as a TABLE puts the food in one column and its
+    // quantity in another, so the amount on a line belongs to the row above,
+    // not the line below -- and a "Scaled amount" column adds a second
+    // quantity for the same food. Rejoining there shifts every ingredient
+    // onto a neighbour's number (one corpus file read 1704 g of salt, and a
+    // salad 3407 g of onion). The header row is what says so: a plain recipe
+    // never writes "Amount" or "Scaled amount" on a line by itself.
+    for (var h = 0; h < lines.length; h++) {
+      if (TABLE_HEADER.test(String(lines[h]).trim())) return lines;
+    }
+
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var ln = String(lines[i]).trim();
+      var next = i + 1 < lines.length ? String(lines[i + 1]).trim() : "";
+      if (ln && next && QTY_UNIT_ONLY.test(normalizeFractions(ln)) &&
+          !NUTRIENT_WORD.test(next.replace(/\s+/g, "")) &&
+          !QTY_UNIT_ONLY.test(normalizeFractions(next)) &&
+          /[a-z]{3}/i.test(next)) {
+        out.push(normalizeFractions(ln).replace(/[.,]\s*$/, "").trim() + " " + next);
+        i++;                                  // consume the food line too
+        continue;
+      }
+      out.push(ln);
+    }
+    return out;
+  }
+
   /**
    * Join a line that is the tail of the one above: no leading quantity, and
    * the previous line either dangles on a modifier or this one is an aside.
@@ -845,7 +904,7 @@
     }
     // Split any line holding several ingredients before the other passes.
     var split = [];
-    stitchWrapped(joinStrandedQuantities(out)).forEach(function (ln) {
+    stitchWrapped(joinStrandedAmounts(joinStrandedQuantities(out))).forEach(function (ln) {
       splitRunTogether(ln).forEach(function (part) { split.push(part); });
     });
     return split;
@@ -911,7 +970,11 @@
     var total = { fat: 0, carb: 0, fiber: 0, protein: 0, grams: 0 };
     // Lines that state a measured amount, and how many of them ended up
     // contributing nothing at all -- see statesAnAmount above.
-    var measured = 0, measuredLost = 0;
+    // Two distinct losses: a measured line we could not parse at all,
+    // and one we parsed but then had to stand in for with a 5 g pinch.
+    // The second is the stronger signal -- a line that states "16
+    // tablespoons" should never end up a pinch, whatever the ratio says.
+    var measured = 0, measuredLost = 0, measuredPinched = 0;
 
     for (var i = 0; i < lines.length; i++) {
       var says = statesAnAmount(lines[i]);
@@ -964,7 +1027,14 @@
         // The line stated an amount and we still could not use it: the
         // quantity and its ingredient were separated, so this is a loss,
         // not a genuinely amount-less "salt to taste".
-        if (saysAmount) measuredLost++;
+        if (saysAmount) {
+          measuredLost++;
+          // Only when the QUANTITY vanished. If we read the number and just
+          // could not convert its unit ("1 package cream cheese"), the table
+          // lacks a weight for that container -- a gap worth fixing, but the
+          // recipe's other amounts are intact and a banner would cry wolf.
+          if (item.amount === null) measuredPinched++;
+        }
         grams = 5;
         assumed = true;
       }
@@ -1026,6 +1096,17 @@
     var lostIngredients = (measured >= 4 && withAmounts / measured < 0.5)
       ? { measured: measured, used: withAmounts }
       : null;
+
+    // A second, independent trigger. A line that states "16 tablespoons" and
+    // still ends up a 5 g pinch has lost its quantity outright, and the
+    // ratio above can stay comfortably high while it happens -- one corpus
+    // file kept 4 of 6 amounts and still understated by a factor of four.
+    // No threshold: an ingredient that named an amount should never be a
+    // pinch, so one is already wrong.
+    if (!lostIngredients && measuredPinched > 0) {
+      lostIngredients = { measured: measured, used: withAmounts,
+                          pinched: measuredPinched };
+    }
 
     return {
       title: recipeTitle(text),
