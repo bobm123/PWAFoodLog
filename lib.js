@@ -14,7 +14,7 @@
   // App version, shown in Settings -> About. This is the single source of
   // truth: sw.js builds its cache name from it, so bumping this is what makes
   // installed copies pick up a new release. Bump it on every deploy.
-  var APP_VERSION = "1.7.0";
+  var APP_VERSION = "1.8.0";
 
   // ---------------------------------------------------------------------
   // High-glycemic / refined-carb ingredient watchlist.
@@ -887,21 +887,45 @@
    * dropped ingredient makes the totals quietly wrong -- the caller is
    * expected to make the user deal with them before saving.
    */
+  // A line that states a measured amount is almost certainly an ingredient,
+  // whatever else happens to it. Used to notice ingredients going missing:
+  // some PDFs drop the "fl" ligature from their text layer, so "flour"
+  // extracts as "our" and the line silently contributes nothing -- one test
+  // recipe reported 114 kcal a scone instead of 431 because the flour, the
+  // baking powder, the soda and the salt all vanished that way.
+  var MEASURED = new RegExp(
+    "(^|\\s)(\\d+([.,]\\d+)?|\\d*\\s*\\d+\\s*/\\s*\\d+|[\u00bc-\u00be\u2150-\u215e])" +
+    "\\s*(cups?|tbsps?|tablespoons?|tsps?|teaspoons?|ounces?|oz|pounds?|lbs?|lb|" +
+    "grams?|g|kg|ml|l|litres?|liters?|sticks?|cloves?|cans?|packages?|pkgs?|" +
+    "slices?|pinch(es)?|quarts?|pints?|gallons?)\\b", "i");
+
+  function statesAnAmount(line) {
+    return MEASURED.test(String(line || ""));
+  }
+
   function analyzeRecipeText(text, servings, db) {
     db = db || {};
     servings = Number(servings) > 0 ? Number(servings) : 4;
     var lines = recipeLines(text);
     var rows = [], unresolved = [];
     var total = { fat: 0, carb: 0, fiber: 0, protein: 0, grams: 0 };
+    // Lines that state a measured amount, and how many of them ended up
+    // contributing nothing at all -- see statesAnAmount above.
+    var measured = 0, measuredLost = 0;
 
     for (var i = 0; i < lines.length; i++) {
+      var says = statesAnAmount(lines[i]);
+      if (says) measured++;
       var item = parseIngredientLine(lines[i], db);
-      if (!item) { continue; }
+      if (!item) { if (says) measuredLost++; continue; }
+      // Remember for the assumed-pinch check below, after grams are known.
+      var saysAmount = says;
       var rec = item.dbKey ? db[item.dbKey] : null;
 
       // Nothing in the table to measure against: the user has to supply it.
       if (!rec) {
-        unresolved.push({ raw: item.raw, name: item.name, reason: "not-in-table" });
+        unresolved.push({ raw: item.raw, name: item.name, reason: "not-in-table",
+                          measured: says });
         continue;
       }
 
@@ -937,6 +961,10 @@
       // something that genuinely has none.
       var assumed = false;
       if (grams === null || !(grams > 0)) {
+        // The line stated an amount and we still could not use it: the
+        // quantity and its ingredient were separated, so this is a loss,
+        // not a genuinely amount-less "salt to taste".
+        if (saysAmount) measuredLost++;
         grams = 5;
         assumed = true;
       }
@@ -975,6 +1003,30 @@
     var looked = rows.length + needsInput.length;
     var unusable = looked >= 6 && rows.length / looked < 0.25;
 
+    // A measured line filed as noise is lost just as surely as one that was
+    // never parsed: the user is never asked about it and it never reaches
+    // the totals.
+    for (var g = 0; g < ignored.length; g++) {
+      if (ignored[g].measured) measuredLost++;
+    }
+
+    // Warn when the totals are an undercount because stated amounts did not
+    // survive. Compare lines that state a measured amount against rows that
+    // actually used one -- an "assumed" row is a 5 g pinch standing in for a
+    // quantity we failed to read.
+    //
+    // The threshold is where the corpus separates: over 89 files, dropping
+    // below half flags 7, and nothing at all sits between 50% and 60%, so
+    // the line is in a genuine gap rather than tuned to a wanted answer.
+    // It is deliberately a floor, not a tripwire -- a recipe can lose one
+    // ingredient to a wrapped column and still be broadly right, and crying
+    // wolf on those would teach the user to ignore the banner.
+    var withAmounts = 0;
+    for (var w = 0; w < rows.length; w++) if (!rows[w].assumed) withAmounts++;
+    var lostIngredients = (measured >= 4 && withAmounts / measured < 0.5)
+      ? { measured: measured, used: withAmounts }
+      : null;
+
     return {
       title: recipeTitle(text),
       servings: servings,
@@ -984,6 +1036,9 @@
       // The caller should ask for the ingredients to be pasted directly
       // rather than presenting the unresolved list.
       unusable: unusable,
+      // Set when measured ingredient lines vanished: the totals are an
+      // undercount and the caller should say so rather than present them.
+      lostIngredients: lostIngredients,
       total: total,
       perServing: per
     };
@@ -2120,6 +2175,7 @@
     joinStrandedQuantities: joinStrandedQuantities,
     recipeTitle: recipeTitle,
     analyzeRecipeText: analyzeRecipeText,
+    statesAnAmount: statesAnAmount,
     foodFromRecipeAnalysis: foodFromRecipeAnalysis,
     foodFromProduct: foodFromProduct,
     foodWithEdits: foodWithEdits,

@@ -1022,6 +1022,59 @@ ok("a saved food keeps its additives",
    L.foodFromProduct({ code: "1", name: "x", additives: ["E330", "E322"] })
      .additives.length === 2);
 
+console.log("\n-- lost ingredient warning --");
+// Some layouts put the amount in a different column or line from its
+// ingredient. Every line then becomes a 5 g pinch and the recipe reports a
+// fraction of its real calories -- one corpus file came out at 5 kcal a
+// cookie. The parse "succeeds", so nothing else catches it.
+const COLUMNS = ["Grandma Burke's", "Chocolate Chip Cookies",
+  "Ingredient", "Amount",
+  "Sugar", "1", "cup", "Brown Sugar", "1", "cup",
+  "Butter (room temp)", "1", "cup", "Eggs", "2", "each",
+  "Flour", "3", "cups", "Salt", "1", "tsp"].join("\n");
+const COL = L.analyzeRecipeText(COLUMNS, 24, NDB);
+ok("a column layout is flagged", !!COL.lostIngredients,
+   JSON.stringify(COL.lostIngredients));
+ok("the flag counts what was stated and what survived",
+   COL.lostIngredients.measured >= 4 && COL.lostIngredients.used === 0,
+   JSON.stringify(COL.lostIngredients));
+
+// The same recipe written one-per-line must be silent -- crying wolf on a
+// good parse would teach the user to ignore the banner.
+const PLAIN = L.analyzeRecipeText(
+  ["Chocolate Chip Cookies", "1 cup sugar", "1 cup brown sugar",
+   "1 cup butter", "2 eggs", "3 cups flour", "1 tsp salt"].join("\n"), 24, NDB);
+ok("a clean paste is not flagged", PLAIN.lostIngredients === null,
+   JSON.stringify(PLAIN.lostIngredients));
+ok("...and it really did read the amounts",
+   PLAIN.rows.filter(function (r) { return !r.assumed; }).length >= 5);
+
+// "Salt to taste" has no amount to lose, so a recipe full of them is not a
+// failed parse and must not be flagged.
+const NOAMOUNTS = L.analyzeRecipeText(
+  ["Herb rub", "Salt", "Pepper", "Paprika", "Dill", "Garlic"].join("\n"), 1, NDB);
+ok("ingredients with no stated amount are not a failure",
+   NOAMOUNTS.lostIngredients === null);
+
+// Too small a sample to judge: one odd line in a three-line recipe is not
+// evidence of a broken layout.
+const TINY = L.analyzeRecipeText("Snack\n1 cup\n2 cups", 1, NDB);
+ok("a very short recipe is not flagged", TINY.lostIngredients === null,
+   JSON.stringify(TINY.lostIngredients));
+
+// statesAnAmount underpins the whole check.
+ok("a measured line is recognised", L.statesAnAmount("2 cups flour"));
+ok("a vulgar fraction counts", L.statesAnAmount("½ cup sour cream"));
+ok("a metric amount counts", L.statesAnAmount("500g green beans"));
+// Even when the ingredient name is damaged -- a PDF that drops the "fl"
+// ligature turns "flour" into "our", and the amount is still stated.
+ok("a damaged ingredient name still states its amount",
+   L.statesAnAmount("2 cups unbleached all-purpose our"));
+ok("prose with a number is not an amount",
+   !L.statesAnAmount("Preheat the oven to 350 degrees"));
+ok("a bare ingredient is not an amount", !L.statesAnAmount("Salt and pepper"));
+
+
 console.log("\n-- app version --");
 ok("APP_VERSION is semver", /^\d+\.\d+\.\d+$/.test(L.APP_VERSION), L.APP_VERSION);
 

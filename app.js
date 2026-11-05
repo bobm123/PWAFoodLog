@@ -1758,6 +1758,28 @@
           fmt(per.grams, 0) + " g</span></div>" +
       "</div>";
 
+    // The totals are an undercount: amounts were stated in the text but did
+    // not survive the parse, so the numbers above are too low. Say so above
+    // them rather than below -- the figure is the thing not to trust.
+    var lost = "";
+    if (a.lostIngredients) {
+      var li = a.lostIngredients;
+      lost =
+        '<div class="warnbox">' +
+          "<h3>These numbers are too low</h3>" +
+          '<p class="flagnote">The text states ' + li.measured +
+            " amounts but only " + li.used + " came through, so most " +
+            "ingredients are counted as a pinch. That usually means the " +
+            "amounts sit in a separate column or line from their " +
+            "ingredient, which this reader can't follow." +
+          "</p>" +
+          '<p class="flagnote">Paste the ingredients one per line, each ' +
+            "starting with its amount &mdash; <em>2 cups flour</em> &mdash; " +
+            "and they will all count." +
+          "</p>" +
+        "</div>";
+    }
+
     // Each unresolved line needs a weight or an explicit skip. Leaving them
     // out silently is what makes a recipe's totals quietly wrong.
     var asks = "";
@@ -1799,7 +1821,7 @@
       : "";
 
     $("recipeReview").innerHTML =
-      '<div class="rvbox">' + head + totals + asks + ing +
+      '<div class="rvbox">' + head + lost + totals + asks + ing +
         '<div class="row" style="margin-top:.6rem">' +
           '<button id="btnSaveRecipe" class="primary"' +
             (unresolvedLeft ? " disabled" : "") + ">Save recipe</button>" +
