@@ -1165,6 +1165,54 @@ ok("an unknown container unit does not warn",
    PACKAGE.lostIngredients === null, JSON.stringify(PACKAGE.lostIngredients));
 
 
+console.log("\n-- an ingredient the method restates --");
+// Some pages repeat each ingredient as the heading of the step that uses
+// it, and every one was weighed twice.
+const RESTATED = L.analyzeRecipeText(
+  "Spheres\nINGREDIENTS\n" +
+  "2 cups vegetable oil\n1 cup cold water\n1/4 cup kosher salt\n" +
+  "At least four hours before you begin, pour the oil into the container " +
+  "and place it in the refrigerator to chill.\n" +
+  "Stir the salt into the ice and arrange it around the container until " +
+  "the bath is cold enough to set the spheres.\n" +
+  "2 cups vegetable oil\n",
+  4, NDB);
+const oilRows = RESTATED.rows.filter(function (r) { return r.dbKey === "vegetable oil"; });
+ok("the restated ingredient is counted once", oilRows.length === 1,
+   JSON.stringify(oilRows));
+
+// The same text with no method between the copies is a second component,
+// not a restatement, so both must count.
+const TWICE = L.analyzeRecipeText(
+  "Halupky\nINGREDIENTS\n" +
+  "1 tsp garlic powder\n1 tbs ground sage\n2 tsps salt\n" +
+  "1 tsp garlic powder\n1 large onion\n",
+  4, NDB);
+const garlicRows = TWICE.rows.filter(function (r) { return r.dbKey === "garlic"; });
+ok("the same ingredient in two components counts twice",
+   garlicRows.length === 2, JSON.stringify(garlicRows));
+
+// A repeated line that never resolved to a weighed ingredient must not be
+// treated as a restatement: a mangled text layer repeats prose constantly,
+// and keying on those changed 51 of 89 corpus files.
+const PROSEDUP = L.recipeLines(
+  "Pudding\nINGREDIENTS\n2 cups flour\n" +
+  "Photograph by the author, all rights reserved.\n" +
+  "Yorkshire puddings are traditionally cooked in a large pan and " +
+  "served alongside the roast.\n" +
+  "Photograph by the author, all rights reserved.\n");
+ok("repeated prose is left alone",
+   PROSEDUP.filter(function (x) { return /^Photograph/.test(x); }).length === 2,
+   JSON.stringify(PROSEDUP));
+
+console.log("\n-- looksLikeProse --");
+ok("an instruction is prose",
+   L.looksLikeProse("Stir the salt into the ice and arrange it around the container."));
+ok("an ingredient is not prose", !L.looksLikeProse("2 cups vegetable oil"));
+ok("a short sentence is not prose", !L.looksLikeProse("Serve warm."));
+ok("a heading is not prose", !L.looksLikeProse("FOR THE SAUCE"));
+
+
 console.log("\n-- app version --");
 ok("APP_VERSION is semver", /^\d+\.\d+\.\d+$/.test(L.APP_VERSION), L.APP_VERSION);
 

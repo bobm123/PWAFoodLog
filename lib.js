@@ -14,7 +14,7 @@
   // App version, shown in Settings -> About. This is the single source of
   // truth: sw.js builds its cache name from it, so bumping this is what makes
   // installed copies pick up a new release. Bump it on every deploy.
-  var APP_VERSION = "1.8.1";
+  var APP_VERSION = "1.8.2";
 
   // ---------------------------------------------------------------------
   // High-glycemic / refined-carb ingredient watchlist.
@@ -384,6 +384,17 @@
   // is a range, not a step. A real step also runs on, so looksLikeStep
   // adds a length floor; a short "1. Dough" is a sub-heading, not a method.
   var NUMBERED_STEP = /^\s*\d{1,2}\s*(?:[.)]\s+|-\s*)[A-Za-z]/;
+
+  /**
+   * A sentence of method, as opposed to an ingredient or a heading. Long,
+   * ending in terminal punctuation, and joined by the kind of function word
+   * an instruction uses ("stir X into Y until Z").
+   */
+  function looksLikeProse(line) {
+    var ln = String(line || "").trim();
+    return ln.length > 45 && /[.!?]$/.test(ln) &&
+           /\s(and|the|to|into|until|with|in)\s/i.test(ln);
+  }
 
   function looksLikeStep(line) {
     var ln = String(line || "").trim();
@@ -976,8 +987,20 @@
     // tablespoons" should never end up a pinch, whatever the ratio says.
     var measured = 0, measuredLost = 0, measuredPinched = 0;
 
+    // An ingredient the method restates at the step that uses it would
+    // otherwise be weighed twice -- an activity page laid out over 12 pages
+    // repeated all four of its ingredients and read 985 kcal a serving.
+    // Keyed on the line as written, and only once the method has begun:
+    // a recipe may genuinely use the same thing in two components, and
+    // those sit together in one list with no instructions between them.
+    var firstSeen = {}, proseSoFar = 0;
+
     for (var i = 0; i < lines.length; i++) {
+      if (looksLikeProse(lines[i])) proseSoFar++;
       var says = statesAnAmount(lines[i]);
+      var dedupeKey = String(lines[i]).trim().toLowerCase().replace(/\s+/g, " ");
+      var seenAt = firstSeen[dedupeKey];
+      if (seenAt !== undefined && proseSoFar - seenAt >= 2) continue;
       if (says) measured++;
       var item = parseIngredientLine(lines[i], db);
       if (!item) { if (says) measuredLost++; continue; }
@@ -1046,6 +1069,11 @@
         fiber: rec.fiber * f, protein: rec.protein * f
       };
       row.netCarb = netCarbs(row.carb, row.fiber);
+      // Only a real weighed ingredient can be restated later; remember the
+      // prose count at this point so the gap test above is a subtraction.
+      if (!assumed && firstSeen[dedupeKey] === undefined) {
+        firstSeen[dedupeKey] = proseSoFar;
+      }
       rows.push(row);
       total.fat += row.fat; total.carb += row.carb;
       total.fiber += row.fiber; total.protein += row.protein;
@@ -2257,6 +2285,7 @@
     recipeTitle: recipeTitle,
     analyzeRecipeText: analyzeRecipeText,
     statesAnAmount: statesAnAmount,
+    looksLikeProse: looksLikeProse,
     foodFromRecipeAnalysis: foodFromRecipeAnalysis,
     foodFromProduct: foodFromProduct,
     foodWithEdits: foodWithEdits,
