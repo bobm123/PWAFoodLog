@@ -22,3 +22,7 @@ off.csv.gz
 *.csv.gz
 *.jsonl.gz
 *.parquet
+
+# Text extracted from TestRecipes by tools/corpus_extract.py;
+# regenerate it rather than committing it.
+_corpus/
