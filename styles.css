@@ -419,6 +419,26 @@ a.btnlink:hover{border-color:var(--green);color:var(--green)}
 .rving{margin-top:.5rem;font-size:.82rem}
 .rving summary{color:var(--green);cursor:pointer;font-weight:600;padding:.2rem 0}
 
+/* One editable ingredient: name, its weight, and the two actions. The name
+   takes the slack so the controls stay put as the list scrolls. */
+.ingrow{
+  display:flex;align-items:center;gap:.4rem;
+  padding:.3rem 0;border-bottom:1px solid var(--line);
+}
+.ingrow:last-of-type{border-bottom:0}
+.ingrow .dk{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+.ingrow .ingg{flex:0 0 4.6rem;width:4.6rem;text-align:right}
+/* A guessed pinch is the row most likely to need a real number. */
+.ingrow.assumed .dk{color:var(--fg)}
+.ingrow.ingadd{border-top:1px solid var(--line);margin-top:.35rem;padding-top:.5rem}
+.rvname{
+  flex:1 1 auto;min-width:0;
+  background:#0d100f;color:var(--fg);border:1px solid var(--line);
+  border-radius:8px;padding:.3rem .45rem;font:inherit;font-size:.82rem;
+}
+/* Keep every control at a thumb-sized target on a phone. */
+.ingrow .tiny{min-height:2rem}
+
 
 /* ---- entry times ---- */
 .etime{color:var(--green);font-variant-numeric:tabular-nums}

@@ -1814,16 +1814,37 @@
         }).join("");
     }
 
+    // The ingredient list is editable: a weight the parser guessed wrong, an
+    // ingredient the page listed but you left out, one you added by hand.
+    // Open by default when a row was assumed, since those are the ones most
+    // likely to need a real number.
+    var anyAssumed = a.rows.some(function (r) { return r.assumed; });
     var ing = a.rows.length
-      ? '<details class="rving"><summary>' + a.rows.length + " resolved ingredient" +
-        (a.rows.length === 1 ? "" : "s") + "</summary>" +
-        a.rows.map(function (r) {
-          return '<div class="drow"><span class="dk">' + esc(r.name) +
-            (r.assumed ? " *" : "") + '</span><span class="dv">' +
-            fmt(r.grams, 0) + " g</span></div>";
+      ? '<details class="rving"' + (anyAssumed ? " open" : "") + "><summary>" +
+        a.rows.length + " ingredient" + (a.rows.length === 1 ? "" : "s") +
+        " &mdash; tap a weight to change it</summary>" +
+        a.rows.map(function (r, i) {
+          return '<div class="ingrow' + (r.assumed ? " assumed" : "") + '">' +
+            '<span class="dk">' + esc(r.name) + (r.assumed ? " *" : "") + "</span>" +
+            '<input class="rvgrams ingg" id="ing' + i + '" type="number" step="any" ' +
+              'inputmode="decimal" value="' + fmt(r.grams, 0) + '" ' +
+              'aria-label="grams of ' + esc(r.name) + '">' +
+            '<button class="ghost tiny" data-ingset="' + i + '">Set</button>' +
+            '<button class="ghost tiny" data-ingdel="' + i + '" ' +
+              'aria-label="remove ' + esc(r.name) + '">Remove</button>' +
+          "</div>";
         }).join("") +
-        (a.rows.some(function (r) { return r.assumed; })
-          ? '<p class="hint">* no amount given; a small pinch was assumed.</p>' : "") +
+        (anyAssumed
+          ? '<p class="hint">* no amount was given, so a small pinch was ' +
+            "assumed. Type the real weight if you know it.</p>" : "") +
+        '<div class="ingrow ingadd">' +
+          '<input class="rvname" id="ingNewName" type="text" ' +
+            'placeholder="add an ingredient" aria-label="ingredient to add">' +
+          '<input class="rvgrams" id="ingNewGrams" type="number" step="any" ' +
+            'inputmode="decimal" placeholder="grams" aria-label="grams to add">' +
+          '<button class="ghost tiny" id="btnIngAdd">Add</button>' +
+        "</div>" +
+        '<p class="hint" id="ingAddNote"></p>' +
         "</details>"
       : "";
 
@@ -1861,6 +1882,77 @@
     });
     per.grams += extra / a.servings;
     return per;
+  }
+
+  /**
+   * Re-weigh one ingredient. The parser's guess is often a pinch standing in
+   * for an amount it could not read, so this is the common repair.
+   */
+  function setIngredientGrams(i) {
+    var a = recipeAnalysis;
+    if (!a || !a.rows[i]) return;
+    var g = parseFloat(($("ing" + i) || {}).value);
+    if (!(g > 0)) { status($("importStatus"), "Give a weight in grams.", "err"); return; }
+
+    var r = a.rows[i];
+    // Scale the macros rather than re-matching: the row already knows what
+    // it is, and per-gram macros are just its own values over its weight.
+    if (r.grams > 0) {
+      var k = g / r.grams;
+      ["fat", "carb", "fiber", "protein"].forEach(function (m) { r[m] = r[m] * k; });
+    }
+    r.grams = g;
+    r.assumed = false;                  // a weight you typed is not a guess
+    r.netCarb = Math.max(0, r.carb - r.fiber);
+    L.recomputeTotals(a);
+    status($("importStatus"), "", "");
+    renderRecipeReview();
+  }
+
+  function removeIngredient(i) {
+    var a = recipeAnalysis;
+    if (!a || !a.rows[i]) return;
+    a.rows.splice(i, 1);
+    L.recomputeTotals(a);
+    renderRecipeReview();
+  }
+
+  /**
+   * Add an ingredient the paste missed. One the food table knows contributes
+   * real macros; one it does not is treated exactly like an unmatched line
+   * from the paste -- its grams count toward the serving, its macros do not,
+   * because we would be making them up.
+   */
+  function addIngredient() {
+    var a = recipeAnalysis;
+    if (!a) return;
+    var name = ($("ingNewName") || {}).value || "";
+    var g = parseFloat(($("ingNewGrams") || {}).value);
+    name = name.trim();
+    if (!name) { status($("importStatus"), "Name the ingredient to add.", "err"); return; }
+    if (!(g > 0)) { status($("importStatus"), "Give a weight in grams.", "err"); return; }
+
+    var row = L.ingredientRow(name, g, NutritionDB.DB);
+    if (row) {
+      a.rows.push(row);
+      L.recomputeTotals(a);
+      status($("importStatus"), "", "");
+      renderRecipeReview();
+      return;
+    }
+
+    // Not in the table. Record it the way an unmatched paste line is
+    // recorded, so it is counted and visible rather than silently dropped.
+    a.unresolved.push({ raw: name + " (" + Math.round(g) + " g)", name: name,
+                        reason: "not-in-table", measured: true });
+    recipeFixes[a.unresolved.length - 1] = g;
+    status($("importStatus"), "", "");
+    renderRecipeReview();
+    var note = $("ingAddNote");
+    if (note) {
+      note.textContent = "\u201c" + name + "\u201d isn't in the food table, so its " +
+        Math.round(g) + " g count toward the serving but add no macros.";
+    }
   }
 
   function saveRecipe() {
@@ -2611,6 +2703,9 @@
         delete recipeFixes[Number(b.dataset.unfix)];
         renderRecipeReview();
       }
+      else if (b.dataset.ingset !== undefined) setIngredientGrams(Number(b.dataset.ingset));
+      else if (b.dataset.ingdel !== undefined) removeIngredient(Number(b.dataset.ingdel));
+      else if (b.id === "btnIngAdd") addIngredient();
       else if (b.dataset.editfood) startEditFood(b.dataset.editfood);
       else if (b.dataset.savefood) saveFoodEdits(b.dataset.savefood);
       else if (b.dataset.cancelfoodedit) cancelEditFood();

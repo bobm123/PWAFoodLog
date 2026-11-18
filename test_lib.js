@@ -1245,6 +1245,57 @@ ok("'with' is left alone",
    String(L.matchIngredient("Chicken Piccata with Artichokes", NDB)));
 
 
+console.log("\n-- editing a recipe's ingredients --");
+const EDIT = L.analyzeRecipeText(
+  "Sardine salad\nINGREDIENTS\n" +
+  "1 can sardines in olive oil\n2 cups romaine lettuce\n1 medium tomato\n", 1, NDB);
+const kcal0 = EDIT.perServing.kcal;
+const g0 = EDIT.perServing.grams;
+ok("the salad parses to something sensible", kcal0 > 300 && kcal0 < 800,
+   String(Math.round(kcal0)));
+
+// Remove an ingredient: totals must fall by exactly that row.
+const tom = EDIT.rows.filter(r => r.dbKey === "tomato")[0];
+ok("the tomato is there to remove", !!tom);
+EDIT.rows = EDIT.rows.filter(r => r.dbKey !== "tomato");
+L.recomputeTotals(EDIT);
+ok("removing an ingredient drops its weight",
+   close(EDIT.perServing.grams, g0 - tom.grams, 0.01),
+   EDIT.perServing.grams + " vs " + (g0 - tom.grams));
+ok("removing an ingredient drops its calories", EDIT.perServing.kcal < kcal0);
+
+// Add one the table knows: it must contribute real macros.
+const fat1 = EDIT.perServing.fat;
+const oil = L.ingredientRow("olive oil", 14, NDB);
+ok("a known ingredient builds a row", !!oil && oil.dbKey === "olive oil",
+   JSON.stringify(oil));
+ok("...with the macros for its weight", close(oil.fat, 14, 0.01), String(oil.fat));
+EDIT.rows.push(oil);
+L.recomputeTotals(EDIT);
+ok("adding oil adds its fat", close(EDIT.perServing.fat, fat1 + 14, 0.01),
+   EDIT.perServing.fat + " vs " + (fat1 + 14));
+
+// recomputeTotals must agree with what analyzeRecipeText produced, or an
+// edit would silently shift the numbers even when nothing changed.
+const FRESH = L.analyzeRecipeText(
+  "Salad\nINGREDIENTS\n2 cups romaine lettuce\n1 medium tomato\n", 2, NDB);
+const beforeKcal = FRESH.perServing.kcal, beforeG = FRESH.perServing.grams;
+L.recomputeTotals(FRESH);
+ok("recomputing an untouched analysis changes nothing",
+   close(FRESH.perServing.kcal, beforeKcal, 0.001) &&
+   close(FRESH.perServing.grams, beforeG, 0.001),
+   FRESH.perServing.kcal + " vs " + beforeKcal);
+ok("servings still divide the total",
+   close(FRESH.perServing.grams * 2, FRESH.total.grams, 0.001));
+
+// An ingredient the table does not know has no macros to offer, so the
+// caller has to handle it rather than getting invented numbers.
+ok("an unknown ingredient builds no row",
+   L.ingredientRow("unobtainium", 50, NDB) === null);
+ok("a zero weight builds no row", L.ingredientRow("olive oil", 0, NDB) === null);
+ok("a negative weight builds no row", L.ingredientRow("olive oil", -5, NDB) === null);
+
+
 console.log("\n-- app version --");
 ok("APP_VERSION is semver", /^\d+\.\d+\.\d+$/.test(L.APP_VERSION), L.APP_VERSION);
 

@@ -14,7 +14,7 @@
   // App version, shown in Settings -> About. This is the single source of
   // truth: sw.js builds its cache name from it, so bumping this is what makes
   // installed copies pick up a new release. Bump it on every deploy.
-  var APP_VERSION = "1.8.3";
+  var APP_VERSION = "1.9.0";
 
   // ---------------------------------------------------------------------
   // High-glycemic / refined-carb ingredient watchlist.
@@ -1182,6 +1182,64 @@
     };
   }
 
+  /**
+   * Rebuild an analysis's totals from its rows.
+   *
+   * The review screen lets the user change a weight, drop an ingredient or
+   * add one, and the totals have to follow. Recomputing from the rows is
+   * the only honest way to do that -- adjusting the existing totals by a
+   * delta drifts, because net carbs are clamped at zero per row.
+   *
+   * Mutates and returns the analysis, so the Save path keeps reading the
+   * same `total` and `perServing` fields it always has.
+   */
+  function recomputeTotals(a) {
+    if (!a) return a;
+    var servings = Number(a.servings) > 0 ? Number(a.servings) : 1;
+    var total = { fat: 0, carb: 0, fiber: 0, protein: 0, grams: 0 };
+    for (var i = 0; i < a.rows.length; i++) {
+      var r = a.rows[i];
+      total.fat += num(r.fat); total.carb += num(r.carb);
+      total.fiber += num(r.fiber); total.protein += num(r.protein);
+      total.grams += num(r.grams);
+    }
+    total.netCarb = netCarbs(total.carb, total.fiber);
+    total.kcal = total.fat * 9 + total.netCarb * 4 + total.protein * 4;
+
+    var per = {};
+    ["fat", "carb", "fiber", "protein", "netCarb", "kcal", "grams"]
+      .forEach(function (k) { per[k] = total[k] / servings; });
+
+    a.total = total;
+    a.perServing = per;
+    return a;
+  }
+
+  /**
+   * Build a row for an ingredient the user typed on the review screen.
+   *
+   * Returns null when the table has nothing for that name: the caller then
+   * treats it exactly like an unmatched line from the paste -- ask for a
+   * weight, count the grams, claim no macros. Knowing how much went in
+   * without knowing what was in it is the honest state, and inventing
+   * macros for it would be worse than leaving them out.
+   */
+  function ingredientRow(name, grams, db) {
+    var g = num(grams);
+    if (!(g > 0)) return null;
+    var key = matchIngredient(name, db || {});
+    var rec = key ? (db || {})[key] : null;
+    if (!rec) return null;
+    var f = g / 100;
+    var row = {
+      name: String(name).trim(), dbKey: key, grams: g, assumed: false,
+      fat: rec.fat * f, carb: rec.carb * f,
+      fiber: rec.fiber * f, protein: rec.protein * f
+    };
+    row.netCarb = netCarbs(row.carb, row.fiber);
+    return row;
+  }
+
   /** Turn an analyzeRecipeText result into a saveable food record. */
   function foodFromRecipeAnalysis(a, nameOverride) {
     if (!a || !(a.perServing.grams > 0)) return null;
@@ -2313,6 +2371,8 @@
     joinStrandedQuantities: joinStrandedQuantities,
     recipeTitle: recipeTitle,
     analyzeRecipeText: analyzeRecipeText,
+    recomputeTotals: recomputeTotals,
+    ingredientRow: ingredientRow,
     statesAnAmount: statesAnAmount,
     looksLikeProse: looksLikeProse,
     foodFromRecipeAnalysis: foodFromRecipeAnalysis,
