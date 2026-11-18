@@ -14,7 +14,7 @@
   // App version, shown in Settings -> About. This is the single source of
   // truth: sw.js builds its cache name from it, so bumping this is what makes
   // installed copies pick up a new release. Bump it on every deploy.
-  var APP_VERSION = "1.8.2";
+  var APP_VERSION = "1.8.3";
 
   // ---------------------------------------------------------------------
   // High-glycemic / refined-carb ingredient watchlist.
@@ -480,7 +480,36 @@
   };
 
   /** Fuzzy-match free text to a table key. */
+  // What a tin or jar is packed in. "sardines in olive oil" is sardines; the
+  // oil is the medium, and matching it instead weighed the fish as pure fat.
+  // Only media that actually appear on a label: a packing clause that names
+  // something else ("beans in tomato sauce") still describes a real part of
+  // the food, so it is left alone.
+  var PACKED_IN = new RegExp(
+    "\\b(?:packed |canned |tinned |)in\\s+" +
+    "(?:extra[- ]virgin\\s+)?(?:olive|sunflower|vegetable|canola|soybean)?" +
+    "\\s*(?:oil|water|brine|spring water|its own juices?)\\b", "i");
+
+  /**
+   * Strip a packing clause, returning the food it was packed in or null.
+   */
+  function withoutPacking(name) {
+    var n = String(name || "");
+    var m = PACKED_IN.exec(n);
+    if (!m || m.index === 0) return null;        // nothing before the clause
+    var head = n.slice(0, m.index).replace(/[\s,]+$/, "").trim();
+    return head.length > 2 ? head : null;
+  }
+
   function matchIngredient(name, db) {
+    // "sardines in olive oil" is sardines. Try the food on its own before the
+    // whole string, where the longer "olive oil" would win on length alone.
+    var packed = withoutPacking(name);
+    if (packed) {
+      var food = matchIngredient(packed, db);
+      if (food) return food;
+    }
+
     var n = String(name || "").toLowerCase().replace(/[^a-z ]/g, " ")
               .replace(/\s+/g, " ").trim();
     if (!n) return null;

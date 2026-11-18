@@ -1213,6 +1213,38 @@ ok("a short sentence is not prose", !L.looksLikeProse("Serve warm."));
 ok("a heading is not prose", !L.looksLikeProse("FOR THE SAUCE"));
 
 
+console.log("\n-- an ingredient packed in oil or water --");
+// "sardines in olive oil" matched the OIL: the substring score is
+// 100 + length, so "olive oil" (9) beat "sardines" (8) by one character and
+// a tin of fish was weighed as pure fat -- 126 g became 125.8 g of it.
+ok("sardines in olive oil are sardines",
+   L.matchIngredient("sardines in olive oil", NDB) === "sardines canned",
+   String(L.matchIngredient("sardines in olive oil", NDB)));
+ok("tuna packed in water is tuna",
+   L.matchIngredient("tuna packed in water", NDB) === "tuna canned",
+   String(L.matchIngredient("tuna packed in water", NDB)));
+ok("the fish, not the oil, sets the fat",
+   NDB[L.matchIngredient("sardines in olive oil", NDB)].fat < 20,
+   String(NDB[L.matchIngredient("sardines in olive oil", NDB)].fat));
+
+// The clause must name a packing MEDIUM. These still match as before.
+ok("oil on its own is still oil",
+   L.matchIngredient("extra-virgin olive oil", NDB) === "olive oil",
+   String(L.matchIngredient("extra-virgin olive oil", NDB)));
+ok("a clause with nothing before it is not stripped",
+   L.matchIngredient("in olive oil", NDB) === "olive oil",
+   String(L.matchIngredient("in olive oil", NDB)));
+ok("a sauce is a real ingredient, not a packing medium",
+   L.matchIngredient("beans in tomato sauce", NDB) === "tomato sauce",
+   String(L.matchIngredient("beans in tomato sauce", NDB)));
+// "with" is deliberately NOT a packing word: it routinely names a second
+// real ingredient, and a title ("Chicken Piccata with Artichokes") is not a
+// packing clause at all.
+ok("'with' is left alone",
+   L.matchIngredient("Chicken Piccata with Artichokes", NDB) === "artichoke",
+   String(L.matchIngredient("Chicken Piccata with Artichokes", NDB)));
+
+
 console.log("\n-- app version --");
 ok("APP_VERSION is semver", /^\d+\.\d+\.\d+$/.test(L.APP_VERSION), L.APP_VERSION);
 
